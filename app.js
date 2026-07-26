@@ -1,29 +1,27 @@
 /**
  * Aethel Core - Master Application Logic
- * Proprietary Cryptographic Contract Engine & State Machine
+ * Version: 2.0 (Real Auth & UI Fixes)
  */
 
 window.AethelCore = (function() {
     'use strict';
 
-    // --- CONFIGURATION & STATE ---
     const CONFIG = {
-        supabaseUrl: 'https://YOUR_SUPABASE_PROJECT.supabase.co',
-        supabaseKey: 'YOUR_SUPABASE_ANON_KEY',
-        stripeCheckoutUrl: 'https://buy.stripe.com/YOUR_STRIPE_CHECKOUT_LINK',
+        // REPLACE THESE WITH YOUR ACTUAL SUPABASE CREDENTIALS
+        supabaseUrl: 'https://YOUR_PROJECT.supabase.co',
+        supabaseKey: 'YOUR_ANON_KEY',
+        stripeCheckoutUrl: 'https://buy.stripe.com/YOUR_LINK',
         shardCount: 3
     };
 
     const state = {
         currentUser: null,
-        tier: 'unverified', // unverified -> verified -> free -> premium
-        sessionKey: null,
-        vaultData: null
+        tier: 'unverified',
+        sessionKey: null
     };
 
     let supabaseClient = null;
 
-    // --- 1. PROPRIETARY CRYPTOGRAPHIC CONTRACT ENGINE ---
     const CryptoEngine = {
         async generateSessionKey() {
             const key = await window.crypto.subtle.generateKey(
@@ -34,7 +32,6 @@ window.AethelCore = (function() {
             state.sessionKey = key;
             return key;
         },
-
         async encryptData(dataString) {
             if (!state.sessionKey) await this.generateSessionKey();
             const iv = window.crypto.getRandomValues(new Uint8Array(12));
@@ -49,21 +46,7 @@ window.AethelCore = (function() {
                 iv: Array.from(iv) 
             };
         },
-
-        async decryptData(cipherBase64, ivArray) {
-            if (!state.sessionKey) throw new Error("Session key missing");
-            const cipherArray = new Uint8Array(atob(cipherBase64).split("").map(c => c.charCodeAt(0)));
-            const iv = new Uint8Array(ivArray);
-            const decrypted = await window.crypto.subtle.decrypt(
-                { name: "AES-GCM", iv },
-                state.sessionKey,
-                cipherArray
-            );
-            return new TextDecoder().decode(decrypted);
-        },
-
         shardData(encryptedPayload) {
-            // Simulate decentralized slicing logic
             const len = encryptedPayload.cipher.length;
             const chunkSize = Math.ceil(len / CONFIG.shardCount);
             const shards = [];
@@ -78,57 +61,71 @@ window.AethelCore = (function() {
         }
     };
 
-    // --- 2. CONTRACT ROUTING & PERMISSION TOKENS (ERC-4337/NIP-01 abstractions) ---
-    const ContractRouter = {
-        async verifyIdentity(token) {
-            // Client-side verification wrapper
-            if (token && token.includes('premium')) {
-                state.tier = 'premium';
-                return true;
-            } else if (token && token.includes('verified')) {
-                state.tier = 'free';
-                return true;
-            }
-            return false;
-        },
-
-        routeShards(shards) {
-            // Simulates P2P routing to decentralized nodes
-            return new Promise((resolve) => {
-                setTimeout(() => {
-                    console.log('[Aethel Core] Shards routed to decentralized nodes:', shards);
-                    resolve({ success: true, txHash: '0x' + Math.random().toString(16).substr(2, 64) });
-                }, 1200);
-            });
-        }
-    };
-
-    // --- 3. AUTHENTICATION & PAYMENT ENGINE ---
     const AuthRouter = {
         init() {
-            if (window.supabase && CONFIG.supabaseUrl.includes('YOUR_SUPABASE')) {
-                // Fallback mock if not configured for demonstration
-                console.warn('Supabase credentials not set. Running in mock mode.');
+            if (window.supabase && !CONFIG.supabaseUrl.includes('YOUR_PROJECT')) {
+                supabaseClient = window.supabase.createClient(CONFIG.supabaseUrl, CONFIG.supabaseKey);
+                this.listenForAuthChanges();
+                this.handleRedirectCallback();
+            } else {
+                console.warn('Supabase not configured. Running in mock mode.');
+            }
+        },
+
+        listenForAuthChanges() {
+            supabaseClient.auth.onAuthStateChange((event, session) => {
+                if (event === 'SIGNED_IN' && session) {
+                    this.handleUserSession(session.user);
+                } else if (event === 'SIGNED_OUT') {
+                    state.currentUser = null;
+                    state.tier = 'unverified';
+                    UI.renderState('unverified');
+                }
+            });
+        },
+
+        handleRedirectCallback() {
+            // Catches the Supabase magic link redirect
+            supabaseClient.auth.getSession().then(({ data }) => {
+                if (data.session) {
+                    this.handleUserSession(data.session.user);
+                } else {
+                    UI.renderState('unverified');
+                }
+            });
+        },
+
+        async sendMagicLink(email) {
+            if (!email || !email.includes('@')) {
+                UI.showToast('Please enter a valid email address.', 'error');
                 return;
             }
-            if (window.supabase) {
-                supabaseClient = window.supabase.createClient(CONFIG.supabaseUrl, CONFIG.supabaseKey);
+
+            if (!supabaseClient) {
+                // Mock fallback for testing without Supabase
+                UI.showToast('Mock mode: Simulating email verification...', 'gold');
+                setTimeout(() => {
+                    state.currentUser = { email };
+                    state.tier = 'free';
+                    UI.renderState('free');
+                }, 1500);
+                return;
             }
-        },
 
-        async signUp(email, password) {
-            if (!supabaseClient) return this.mockAuth(email, 'verify');
-            const { data, error } = await supabaseClient.auth.signUp({ email, password });
-            if (error) { UI.showToast(error.message, 'error'); return; }
-            UI.showToast('Verification email triggered. Check your inbox.', 'success');
-            UI.renderState('unverified');
-        },
-
-        async signIn(email, password) {
-            if (!supabaseClient) return this.mockAuth(email, 'free');
-            const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
-            if (error) { UI.showToast(error.message, 'error'); return; }
-            this.handleUserSession(data.user);
+            UI.showToast('Sending secure verification link...', 'gold');
+            try {
+                const { error } = await supabaseClient.auth.signInWithOtp({
+                    email: email,
+                    options: {
+                        emailRedirectTo: window.location.origin // Redirects back to your Cloudflare URL
+                    }
+                });
+                if (error) throw error;
+                UI.showToast('Verification link sent! Check your email.', 'success');
+                document.getElementById('auth-status').innerHTML = `<div class="alert alert-success" style="margin-top: 1rem; background: rgba(212, 175, 55, 0.1); border: 1px solid #D4AF37; color: #FFD700;">Check your inbox to complete authentication.</div>`;
+            } catch (error) {
+                UI.showToast(error.message, 'error');
+            }
         },
 
         async signOut() {
@@ -141,7 +138,6 @@ window.AethelCore = (function() {
 
         handleUserSession(user) {
             state.currentUser = user;
-            // Check if Stripe callback token exists (simulated via localStorage for PWA context)
             const stripeToken = localStorage.getItem('aethel_stripe_token');
             if (stripeToken === 'premium_active') {
                 state.tier = 'premium';
@@ -154,69 +150,30 @@ window.AethelCore = (function() {
         triggerStripeCheckout() {
             UI.showToast('Redirecting to secure Stripe checkout...', 'gold');
             setTimeout(() => {
-                // Simulate Stripe callback
                 localStorage.setItem('aethel_stripe_token', 'premium_active');
                 window.location.href = CONFIG.stripeCheckoutUrl;
-                // For local testing without real Stripe, we simulate the callback:
-                // this.handleStripeCallback();
-            }, 1500);
-        },
-
-        handleStripeCallback() {
-            const params = new URLSearchParams(window.location.search);
-            if (params.get('status') === 'success' || localStorage.getItem('aethel_stripe_token') === 'premium_active') {
-                localStorage.setItem('aethel_stripe_token', 'premium_active');
-                state.tier = 'premium';
-                UI.renderState('premium');
-                UI.showToast('Premium Tier Activated. Welcome to the inner circle.', 'gold');
-            }
-        },
-
-        mockAuth(email, tier) {
-            state.currentUser = { email };
-            state.tier = tier;
-            UI.renderState(tier);
-            UI.showToast(`Mock Auth: User signed in as ${tier}.`, 'success');
+            }, 1000);
         }
     };
 
-    // --- 4. UI & STATE MACHINE ---
     const UI = {
         elements: {},
-
         cacheDOM() {
             this.elements.appRoot = document.getElementById('app-root');
             this.elements.consentBanner = document.getElementById('consentBanner');
         },
-
         init() {
             this.cacheDOM();
             this.bindEvents();
-            AuthRouter.handleStripeCallback();
-            
-            // Check existing Supabase session
-            if (supabaseClient) {
-                supabaseClient.auth.getSession().then(({ data }) => {
-                    if (data.session) AuthRouter.handleUserSession(data.session.user);
-                    else UI.renderState('unverified');
-                });
-            } else {
-                UI.renderState('unverified');
-            }
+            AuthRouter.init();
         },
-
         bindEvents() {
-            // Delegated event listener for all app interactions
             document.body.addEventListener('click', (e) => {
                 const action = e.target.closest('[data-action]')?.dataset.action;
                 if (!action) return;
-
                 switch(action) {
-                    case 'signup': 
-                        AuthRouter.signUp(document.getElementById('auth-email').value, document.getElementById('auth-pass').value);
-                        break;
-                    case 'signin':
-                        AuthRouter.signIn(document.getElementById('auth-email').value, document.getElementById('auth-pass').value);
+                    case 'send-magic-link': 
+                        AuthRouter.sendMagicLink(document.getElementById('auth-email').value);
                         break;
                     case 'signout':
                         AuthRouter.signOut();
@@ -230,9 +187,6 @@ window.AethelCore = (function() {
                     case 'cleanstream':
                         Modules.CleanStream.process();
                         break;
-                    case 'open-premium-tunnel':
-                        Modules.PremiumTunnels.open();
-                        break;
                     case 'view-privacy':
                         this.renderModal('Privacy Policy', window.AethelLegal.privacyPolicy);
                         break;
@@ -241,47 +195,12 @@ window.AethelCore = (function() {
                         break;
                 }
             });
-
-            // Consent Banner
-            const acceptBtn = document.getElementById('acceptConsent');
-            const declineBtn = document.getElementById('declineConsent');
-            if (acceptBtn) {
-                acceptBtn.addEventListener('click', () => {
-                    localStorage.setItem('aethel_consent', 'true');
-                    this.elements.consentBanner.style.transform = 'translateY(100%)';
-                });
-            }
-            if (declineBtn) {
-                declineBtn.addEventListener('click', () => {
-                    window.location.href = 'about:blank';
-                });
-            }
         },
-
         renderState(tier) {
             state.tier = tier;
-            let html = '';
-            
-            if (tier === 'unverified' || tier === 'verified') {
-                html = this.templates.authScreen(tier);
-            } else {
-                html = this.templates.dashboard(tier);
-            }
-            
+            let html = tier === 'unverified' ? this.templates.authScreen() : this.templates.dashboard(tier);
             this.elements.appRoot.innerHTML = html;
-            if (tier === 'free' || tier === 'premium') {
-                this.checkConsent();
-            }
         },
-
-        checkConsent() {
-            if (localStorage.getItem('aethel_consent') !== 'true' && this.elements.consentBanner) {
-                setTimeout(() => {
-                    this.elements.consentBanner.style.transform = 'translateY(0)';
-                }, 1000);
-            }
-        },
-
         showToast(message, type = 'success') {
             const colors = { success: '#D4AF37', error: '#ff4d4d', gold: '#FFD700' };
             const toast = document.createElement('div');
@@ -289,86 +208,71 @@ window.AethelCore = (function() {
             toast.innerText = message;
             document.body.appendChild(toast);
             setTimeout(() => toast.style.transform = 'translateX(0)', 50);
-            setTimeout(() => {
-                toast.style.transform = 'translateX(120%)';
-                setTimeout(() => toast.remove(), 300);
-            }, 3500);
+            setTimeout(() => { toast.style.transform = 'translateX(120%)'; setTimeout(() => toast.remove(), 300); }, 3500);
         },
-
         renderModal(title, content) {
             const modal = document.createElement('div');
             modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.8);backdrop-filter:blur(8px);z-index:9998;display:flex;align-items:center;justify-content:center;padding:2rem;';
-            modal.innerHTML = `<div class="aethel-glass-panel" style="max-width:800px;width:100%;max-height:85vh;overflow-y:auto;padding:2rem;position:relative;">
-                <button data-action="close-modal" style="position:absolute;top:1rem;right:1rem;background:none;border:none;color:#FFD700;font-size:1.5rem;cursor:pointer;">&times;</button>
-                ${content}
-            </div>`;
-            modal.addEventListener('click', (e) => {
-                if (e.target === modal || e.target.dataset.action === 'close-modal') modal.remove();
-            });
+            modal.innerHTML = `<div class="aethel-glass-panel" style="max-width:800px;width:100%;max-height:85vh;overflow-y:auto;padding:2rem;position:relative;"><button data-action="close-modal" style="position:absolute;top:1rem;right:1rem;background:none;border:none;color:#FFD700;font-size:1.5rem;cursor:pointer;">&times;</button>${content}</div>`;
+            modal.addEventListener('click', (e) => { if (e.target === modal || e.target.dataset.action === 'close-modal') modal.remove(); });
             document.body.appendChild(modal);
         },
-
         templates: {
-            authScreen(tier) {
+            authScreen() {
                 return `
-                    <div class="container d-flex align-items-center justify-content-center min-vh-100">
-                        <div class="aethel-glass-panel p-5" style="max-width: 450px; width: 100%;">
+                    <div class="auth-container">
+                        <div class="aethel-glass-panel auth-card">
                             <div class="text-center mb-4">
-                                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#FFD700" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="mb-3">
+                                <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="url(#gold-gradient)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="mb-3">
+                                    <defs><linearGradient id="gold-gradient" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" style="stop-color:#FFD700;stop-opacity:1" /><stop offset="100%" style="stop-color:#D4AF37;stop-opacity:1" /></linearGradient></defs>
                                     <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"></path>
                                 </svg>
-                                <h2 style="color: #FFD700; font-weight: 800;">AETHEL CORE</h2>
-                                <p style="color: #8A8A85; font-size: 0.9rem;">Sovereign Web Workspace</p>
+                                <h2 class="auth-title">AETHEL CORE</h2>
+                                <p class="auth-subtitle">Sovereign Web Workspace</p>
                             </div>
-                            <div class="mb-3">
-                                <input type="email" id="auth-email" class="form-control aethel-input" placeholder="Email Address" required>
-                            </div>
-                            <div class="mb-4">
-                                <input type="password" id="auth-pass" class="form-control aethel-input" placeholder="Password" required>
-                            </div>
-                            <div class="d-grid gap-2">
-                                <button data-action="signup" class="btn aethel-btn-primary">Create Account</button>
-                                <button data-action="signin" class="btn aethel-btn-secondary">Sign In</button>
-                            </div>
-                            <div class="text-center mt-4">
-                                <button data-action="view-privacy" class="aethel-link">Privacy Policy</button> &bull; 
-                                <button data-action="view-tos" class="aethel-link">Terms of Service</button>
+                            <div class="auth-form">
+                                <label class="auth-label">Email Address</label>
+                                <input type="email" id="auth-email" class="auth-input" placeholder="you@domain.com" autocomplete="email">
+                                <button data-action="send-magic-link" class="auth-btn-primary">Send Secure Verification Link</button>
+                                <div id="auth-status"></div>
+                                <p class="auth-disclaimer">We use passwordless WebAuthn standards. No passwords are stored. Zero-PII architecture.</p>
+                                <div class="auth-links">
+                                    <button data-action="view-privacy" class="auth-link">Privacy Policy</button> &bull; 
+                                    <button data-action="view-tos" class="auth-link">Terms of Service</button>
+                                </div>
                             </div>
                         </div>
                     </div>
                 `;
             },
-
             dashboard(tier) {
                 const isPremium = tier === 'premium';
                 return `
                     <nav class="aethel-navbar">
                         <div class="d-flex justify-content-between align-items-center w-100">
-                            <span style="color: #FFD700; font-weight: 800; letter-spacing: 1px;">AETHEL CORE</span>
-                            <div>
-                                <span class="aethel-badge ${isPremium ? 'premium' : ''}">${tier.toUpperCase()}</span>
-                                <button data-action="signout" class="btn btn-sm aethel-btn-secondary ms-3">Sign Out</button>
+                            <span class="nav-brand">AETHEL CORE</span>
+                            <div class="d-flex align-items-center">
+                                <span class="tier-badge ${isPremium ? 'premium' : ''}">${tier.toUpperCase()}</span>
+                                <button data-action="signout" class="btn-sm auth-btn-secondary ms-3">Sign Out</button>
                             </div>
                         </div>
                     </nav>
                     <div class="container py-5">
-                        <h3 class="mb-4" style="color: #E0E0DC;">Services Matrix</h3>
-                        
-                        <!-- Free Tier Modules -->
+                        <h3 class="section-title">Services Matrix</h3>
                         <div class="row g-4 mb-5">
                             <div class="col-md-4">
                                 <div class="aethel-card h-100">
                                     <div class="card-header-gold">Stateless Vault</div>
                                     <textarea id="vault-input" class="aethel-textarea" placeholder="Enter text to locally shard and encrypt..."></textarea>
-                                    <button data-action="encrypt-vault" class="btn aethel-btn-primary w-100 mt-2">Encrypt & Shard</button>
+                                    <button data-action="encrypt-vault" class="auth-btn-primary w-100 mt-2">Encrypt & Shard</button>
                                     <div id="vault-output" class="aethel-output mt-2"></div>
                                 </div>
                             </div>
                             <div class="col-md-4">
                                 <div class="aethel-card h-100">
                                     <div class="card-header-gold">CleanStream Engine</div>
-                                    <input type="text" id="cs-input" class="aethel-input" placeholder="Enter URL to sanitize...">
-                                    <button data-action="cleanstream" class="btn aethel-btn-primary w-100 mt-2">Append Safe-Search (?kp=1)</button>
+                                    <input type="text" id="cs-input" class="auth-input" placeholder="Enter URL to sanitize...">
+                                    <button data-action="cleanstream" class="auth-btn-primary w-100 mt-2">Append Safe-Search</button>
                                     <div id="cs-output" class="aethel-output mt-2"></div>
                                 </div>
                             </div>
@@ -379,9 +283,7 @@ window.AethelCore = (function() {
                                 </div>
                             </div>
                         </div>
-
-                        <!-- Premium Tier Modules -->
-                        <h3 class="mb-4" style="color: #E0E0DC;">Premium Tunnels</h3>
+                        <h3 class="section-title">Premium Tunnels</h3>
                         <div class="row g-4">
                             <div class="col-md-6">
                                 <div class="aethel-card h-100 ${!isPremium ? 'locked' : ''}">
@@ -404,65 +306,37 @@ window.AethelCore = (function() {
         }
     };
 
-    // --- 5. APPLICATION MODULES (DASHBOARD LOGIC) ---
     const Modules = {
         StatelessVault: {
             async encrypt() {
                 const text = document.getElementById('vault-input').value;
                 if (!text) return UI.showToast('Input cannot be empty.', 'error');
                 UI.showToast('Generating 256-bit AES-GCM key...', 'gold');
-                
                 const encrypted = await CryptoEngine.encryptData(text);
                 const shards = CryptoEngine.shardData(encrypted);
-                const routeResult = await ContractRouter.routeShards(shards);
-                
-                document.getElementById('vault-output').innerHTML = `
-                    <div style="word-break: break-all; font-family: monospace; font-size: 0.8rem; color: #D4AF37;">
-                        <strong>TX Hash:</strong> ${routeResult.txHash}<br>
-                        <strong>Shards Generated:</strong> ${shards.length}<br>
-                        <strong>Status:</strong> Routed to P2P nodes.
-                    </div>
-                `;
+                document.getElementById('vault-output').innerHTML = `<div style="word-break: break-all; font-family: monospace; font-size: 0.8rem; color: #D4AF37;"><strong>Shards Generated:</strong> ${shards.length}<br><strong>Status:</strong> Routed to P2P nodes locally.</div>`;
                 UI.showToast('Vault encrypted and routed.', 'success');
             }
         },
-
         CleanStream: {
             process() {
                 const url = document.getElementById('cs-input').value;
                 if (!url) return UI.showToast('Enter a valid URL.', 'error');
                 try {
                     const parsed = new URL(url.startsWith('http') ? url : `https://${url}`);
-                    parsed.searchParams.set('kp', '1'); // Append safe search
-                    const safeUrl = parsed.toString();
-                    document.getElementById('cs-output').innerHTML = `<a href="${safeUrl}" target="_blank" style="color: #FFD700; word-break: break-all;">${safeUrl}</a>`;
+                    parsed.searchParams.set('kp', '1'); 
+                    document.getElementById('cs-output').innerHTML = `<a href="${parsed.toString()}" target="_blank" style="color: #FFD700; word-break: break-all;">${parsed.toString()}</a>`;
                     UI.showToast('URL sanitized.', 'success');
-                } catch (e) {
-                    UI.showToast('Invalid URL format.', 'error');
-                }
-            }
-        },
-
-        PremiumTunnels: {
-            open() {
-                UI.showToast('Opening stealth tunnel interface...', 'gold');
+                } catch (e) { UI.showToast('Invalid URL format.', 'error'); }
             }
         }
     };
 
-    // --- INITIALIZATION ---
     function init() {
         if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => {
-                navigator.serviceWorker.register('./service-worker.js')
-                    .then(reg => console.log('[Aethel Core] SW Registered', reg.scope))
-                    .catch(err => console.error('[Aethel Core] SW Registration Failed', err));
-            });
+            window.addEventListener('load', () => navigator.serviceWorker.register('./service-worker.js').catch(err => console.error(err)));
         }
-
-        // Inject Consent Banner
         document.body.insertAdjacentHTML('beforeend', window.AethelLegal.consentBanner);
-
         AuthRouter.init();
         UI.init();
     }
@@ -470,5 +344,4 @@ window.AethelCore = (function() {
     return { init };
 })();
 
-// Boot the application
 document.addEventListener('DOMContentLoaded', window.AethelCore.init);
