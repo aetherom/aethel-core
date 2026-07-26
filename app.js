@@ -1,6 +1,6 @@
 /**
- * Aethel Core - Master Application Logic
- * Version: 3.0 (Strict Auth, Floating Dock, Transparent UI)
+ * Aethel Core - Application Core V4.0
+ * Senior-Level Refactor: SPA Router, State Management, Functional Crypto CRUD.
  */
 
 window.AethelCore = (function() {
@@ -9,408 +9,424 @@ window.AethelCore = (function() {
     const CONFIG = {
         supabaseUrl: 'https://YOUR_PROJECT.supabase.co',
         supabaseKey: 'YOUR_ANON_KEY',
-        stripeCheckoutUrl: 'https://buy.stripe.com/YOUR_LINK',
-        shardCount: 3
+        stripeCheckoutUrl: 'https://buy.stripe.com/YOUR_LINK'
     };
 
-    const state = {
-        currentUser: null,
-        tier: 'unverified', // unverified -> pending -> free -> premium
-        sessionKey: null
+    // --- State Store (Observable Pattern) ---
+    const State = {
+        data: {
+            user: null,
+            tier: 'guest', // guest, authenticated, premium
+            vaultEntries: []
+        },
+        listeners: [],
+        subscribe(fn) { this.listeners.push(fn); },
+        setState(updates) {
+            this.data = { ...this.data, ...updates };
+            this.listeners.forEach(fn => fn(this.data));
+        },
+        getState() { return this.data; }
     };
 
     let supabaseClient = null;
 
+    // --- Crypto Engine (Real AES-GCM Implementation) ---
     const CryptoEngine = {
-        async generateSessionKey() {
-            const key = await window.crypto.subtle.generateKey(
+        async generateKey() {
+            // Non-extractable key tied to this browser session for the MVP
+            return await window.crypto.subtle.generateKey(
                 { name: "AES-GCM", length: 256 },
-                true,
+                false, 
                 ["encrypt", "decrypt"]
             );
-            state.sessionKey = key;
-            return key;
         },
-        async encryptData(dataString) {
-            if (!state.sessionKey) await this.generateSessionKey();
+        async encrypt(key, text) {
             const iv = window.crypto.getRandomValues(new Uint8Array(12));
-            const encoded = new TextEncoder().encode(dataString);
-            const ciphertext = await window.crypto.subtle.encrypt(
-                { name: "AES-GCM", iv },
-                state.sessionKey,
-                encoded
-            );
-            return { 
-                cipher: btoa(String.fromCharCode(...new Uint8Array(ciphertext))), 
-                iv: Array.from(iv) 
+            const encoded = new TextEncoder().encode(text);
+            const ciphertext = await window.crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, encoded);
+            return {
+                cipher: btoa(String.fromCharCode(...new Uint8Array(ciphertext))),
+                iv: Array.from(iv)
             };
         },
-        shardData(encryptedPayload) {
-            const len = encryptedPayload.cipher.length;
-            const chunkSize = Math.ceil(len / CONFIG.shardCount);
-            const shards = [];
-            for (let i = 0; i < CONFIG.shardCount; i++) {
-                shards.push({
-                    id: `shard_${i}_${Date.now()}`,
-                    fragment: encryptedPayload.cipher.slice(i * chunkSize, (i + 1) * chunkSize),
-                    iv: i === 0 ? encryptedPayload.iv : null
-                });
+        async decrypt(key, cipherBase64, ivArray) {
+            try {
+                const cipherArr = new Uint8Array(atob(cipherBase64).split("").map(c => c.charCodeAt(0)));
+                const iv = new Uint8Array(ivArray);
+                const decrypted = await window.crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, cipherArr);
+                return new TextDecoder().decode(decrypted);
+            } catch (e) {
+                console.error("Decryption failed", e);
+                return "[DECRYPTION FAILED: INVALID KEY OR DATA]";
             }
-            return shards;
         }
     };
 
-    const AuthRouter = {
+    // --- Authentication & Routing ---
+    const Auth = {
         init() {
             if (window.supabase && !CONFIG.supabaseUrl.includes('YOUR_PROJECT')) {
                 supabaseClient = window.supabase.createClient(CONFIG.supabaseUrl, CONFIG.supabaseKey);
-                this.listenForAuthChanges();
-                this.checkInitialSession();
-            } else {
-                console.warn('Supabase not configured. Running in mock mode.');
-                UI.renderState('unverified');
-            }
-        },
-
-        listenForAuthChanges() {
-            supabaseClient.auth.onAuthStateChange((event, session) => {
-                if (event === 'SIGNED_IN' && session) {
-                    this.handleUserSession(session.user);
-                } else if (event === 'SIGNED_OUT') {
-                    state.currentUser = null;
-                    state.tier = 'unverified';
-                    UI.renderState('unverified');
-                }
-            });
-        },
-
-        async checkInitialSession() {
-            const { data, error } = await supabaseClient.auth.getSession();
-            if (data.session) {
-                this.handleUserSession(data.session.user);
-            } else {
-                UI.renderState('unverified');
-            }
-        },
-
-        async sendMagicLink(email) {
-            if (!email || !email.includes('@')) {
-                UI.showToast('Please enter a valid email address.', 'error');
-                return;
-            }
-
-            if (!supabaseClient) {
-                // Mock fallback for local testing without Supabase
-                UI.showToast('Mock mode: Simulating strict email verification...', 'gold');
-                UI.renderState('pending'); // Force pending state
-                return;
-            }
-
-            UI.showToast('Sending secure verification link...', 'gold');
-            try {
-                const { error } = await supabaseClient.auth.signInWithOtp({
-                    email: email,
-                    options: {
-                        emailRedirectTo: window.location.origin
+                supabaseClient.auth.onAuthStateChange((event, session) => {
+                    if (session) {
+                        State.setState({ user: session.user, tier: 'authenticated' });
+                    } else {
+                        State.setState({ user: null, tier: 'guest' });
                     }
                 });
-                if (error) throw error;
-                UI.renderState('pending'); // Force pending state until email is clicked
-            } catch (error) {
-                UI.showToast(error.message, 'error');
+                supabaseClient.auth.getSession().then(({ data }) => {
+                    if (data.session) State.setState({ user: data.session.user, tier: 'authenticated' });
+                });
             }
         },
-
+        async sendMagicLink(email) {
+            if (!supabaseClient) {
+                UI.toast('Mock mode: Logging in...', 'gold');
+                setTimeout(() => State.setState({ user: { email }, tier: 'authenticated' }), 1000);
+                return;
+            }
+            try {
+                const { error } = await supabaseClient.auth.signInWithOtp({ email, options: { emailRedirectTo: window.location.origin }});
+                if (error) throw error;
+                UI.toast('Verification link sent. Check your email.', 'success');
+            } catch (err) { UI.toast(err.message, 'error'); }
+        },
         async signOut() {
             if (supabaseClient) await supabaseClient.auth.signOut();
-            state.currentUser = null;
-            state.tier = 'unverified';
-            UI.renderState('unverified');
-            UI.showToast('Session terminated.', 'success');
-        },
-
-        handleUserSession(user) {
-            state.currentUser = user;
-            const stripeToken = localStorage.getItem('aethel_stripe_token');
-            if (stripeToken === 'premium_active') {
-                state.tier = 'premium';
-            } else {
-                state.tier = 'free';
-            }
-            UI.renderState(state.tier);
-        },
-
-        triggerStripeCheckout() {
-            UI.showToast('Redirecting to secure Stripe checkout...', 'gold');
-            setTimeout(() => {
-                localStorage.setItem('aethel_stripe_token', 'premium_active');
-                window.location.href = CONFIG.stripeCheckoutUrl;
-            }, 1000);
+            State.setState({ user: null, tier: 'guest' });
         }
     };
 
-    const UI = {
-        elements: {},
-        cacheDOM() {
-            this.elements.appRoot = document.getElementById('app-root');
-            this.elements.consentBanner = document.getElementById('consentBanner');
-        },
+    // --- Router (Hash-based SPA) ---
+    const Router = {
         init() {
-            this.cacheDOM();
-            this.bindEvents();
-            AuthRouter.init();
+            window.addEventListener('hashchange', () => this.render());
+            State.subscribe(() => this.render());
         },
+        navigate(path) { window.location.hash = path; },
+        getRoute() { return window.location.hash.replace('#/', '') || 'dashboard'; },
+        render() {
+            const route = this.getRoute();
+            const state = State.getState();
+            
+            if (state.tier === 'guest') {
+                UI.render(AuthView);
+                return;
+            }
+
+            switch(route) {
+                case 'vault': UI.render(VaultView); break;
+                case 'tools': UI.render(ToolsView); break;
+                case 'settings': UI.render(SettingsView); break;
+                default: UI.render(DashboardView); break;
+            }
+        }
+    };
+
+    // --- Modules (Business Logic) ---
+    const VaultModule = {
+        sessionKey: null,
+        
+        async initKey() {
+            if (!this.sessionKey) this.sessionKey = await CryptoEngine.generateKey();
+            this.loadEntries();
+        },
+        
+        async saveEntry(title, content) {
+            if (!content) return UI.toast('Content cannot be empty.', 'error');
+            if (!this.sessionKey) await this.initKey();
+            
+            const encryptedPayload = await CryptoEngine.encrypt(this.sessionKey, content);
+            const entry = {
+                id: 'vault_' + Date.now(),
+                title: title || 'Untitled Entry',
+                timestamp: new Date().toISOString(),
+                ...encryptedPayload
+            };
+            
+            // Save to localStorage for MVP persistence (would be Supabase DB in prod)
+            const entries = JSON.parse(localStorage.getItem('aethel_vault') || '[]');
+            entries.push(entry);
+            localStorage.setItem('aethel_vault', JSON.stringify(entries));
+            
+            this.loadEntries();
+            UI.toast('Entry encrypted and saved locally.', 'success');
+        },
+        
+        loadEntries() {
+            const entries = JSON.parse(localStorage.getItem('aethel_vault') || '[]');
+            State.setState({ vaultEntries: entries });
+        },
+        
+        async decryptEntry(id) {
+            if (!this.sessionKey) await this.initKey();
+            const entries = State.getState().vaultEntries;
+            const entry = entries.find(e => e.id === id);
+            if (!entry) return;
+            
+            const decryptedText = await CryptoEngine.decrypt(this.sessionKey, entry.cipher, entry.iv);
+            UI.showDecryptedModal(entry.title, decryptedText);
+        },
+        
+        deleteEntry(id) {
+            let entries = State.getState().vaultEntries;
+            entries = entries.filter(e => e.id !== id);
+            localStorage.setItem('aethel_vault', JSON.stringify(entries));
+            State.setState({ vaultEntries: entries });
+            UI.toast('Entry deleted.', 'success');
+        }
+    };
+
+    const ToolsModule = {
+        sanitizeUrl(rawUrl) {
+            try {
+                const url = new URL(rawUrl.startsWith('http') ? rawUrl : `https://${rawUrl}`);
+                
+                // Strip known tracking parameters
+                const trackingParams = ['utm_source', 'utm_medium', 'utm_campaign', 'gclid', 'fbclid', 'ref'];
+                trackingParams.forEach(p => url.searchParams.delete(p));
+                
+                // Add safe search
+                url.searchParams.set('safe', 'active');
+                
+                return url.toString();
+            } catch (e) {
+                UI.toast('Invalid URL format.', 'error');
+                return null;
+            }
+        }
+    };
+
+    // --- Views (UI Components) ---
+    const UI = {
+        root: document.getElementById('app-root'),
         bindEvents() {
             document.body.addEventListener('click', (e) => {
-                const action = e.target.closest('[data-action]')?.dataset.action;
-                if (!action) return;
-                
-                const email = document.getElementById('auth-email')?.value;
+                const target = e.target.closest('[data-action]');
+                if (!target) return;
+                const action = target.dataset.action;
+                const payload = target.dataset.payload || target.value;
 
                 switch(action) {
-                    case 'send-magic-link': 
-                        AuthRouter.sendMagicLink(email);
+                    case 'navigate': Router.navigate(payload); break;
+                    case 'send-magic-link': Auth.sendMagicLink(document.getElementById('auth-email').value); break;
+                    case 'signout': Auth.signOut(); break;
+                    case 'save-vault': 
+                        VaultModule.saveEntry(document.getElementById('vault-title').value, document.getElementById('vault-content').value);
                         break;
-                    case 'signout':
-                        AuthRouter.signOut();
-                        break;
-                    case 'upgrade':
-                        AuthRouter.triggerStripeCheckout();
-                        break;
-                    case 'encrypt-vault':
-                        Modules.StatelessVault.encrypt();
-                        break;
-                    case 'cleanstream':
-                        Modules.CleanStream.process();
-                        break;
-                    case 'view-privacy':
-                        this.renderModal('Privacy Policy', window.AethelLegal.privacyPolicy);
-                        break;
-                    case 'view-tos':
-                        this.renderModal('Terms of Service', window.AethelLegal.termsOfService);
-                        break;
-                    case 'scroll-to':
-                        const target = document.getElementById(e.target.closest('[data-target]').dataset.target);
-                        if(target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    case 'decrypt-vault': VaultModule.decryptEntry(payload); break;
+                    case 'delete-vault': VaultModule.deleteEntry(payload); break;
+                    case 'sanitize-url':
+                        const rawUrl = document.getElementById('url-input').value;
+                        const clean = ToolsModule.sanitizeUrl(rawUrl);
+                        if (clean) {
+                            document.getElementById('url-output').innerHTML = `<a href="${clean}" target="_blank" style="color:var(--gold-bright);word-break:break-all;">${clean}</a>`;
+                        }
                         break;
                 }
             });
         },
-        renderState(tier) {
-            state.tier = tier;
-            let html = '';
-            if (tier === 'unverified' || tier === 'pending') {
-                html = this.templates.authScreen(tier);
-            } else {
-                html = this.templates.dashboard(tier);
-            }
-            this.elements.appRoot.innerHTML = html;
+        render(View) {
+            this.root.innerHTML = View.template();
+            if (View.onMount) View.onMount();
         },
-        showToast(message, type = 'success') {
+        toast(msg, type='success') {
             const colors = { success: '#D4AF37', error: '#ff4d4d', gold: '#FFD700' };
-            const toast = document.createElement('div');
-            toast.className = 'aethel-toast';
-            toast.style.borderColor = colors[type];
-            toast.style.color = colors[type];
-            toast.innerText = message;
-            document.body.appendChild(toast);
-            setTimeout(() => toast.classList.add('show'), 50);
-            setTimeout(() => { toast.classList.remove('show'); setTimeout(() => toast.remove(), 300); }, 3500);
+            const t = document.createElement('div');
+            t.className = 'toast';
+            t.style.borderColor = colors[type];
+            t.style.color = colors[type];
+            t.textContent = msg;
+            document.body.appendChild(t);
+            setTimeout(() => t.classList.add('show'), 50);
+            setTimeout(() => { t.classList.remove('show'); setTimeout(() => t.remove(), 300); }, 3000);
         },
-        renderModal(title, content) {
-            const modal = document.createElement('div');
-            modal.className = 'aethel-modal-overlay';
-            modal.innerHTML = `<div class="aethel-modal-content">${content}<button data-action="close-modal" class="modal-close-btn">&times;</button></div>`;
-            modal.addEventListener('click', (e) => { if (e.target === modal || e.target.dataset.action === 'close-modal') modal.remove(); });
-            document.body.appendChild(modal);
-        },
-        templates: {
-            authScreen(status) {
-                const isPending = status === 'pending';
-                return `
-                    <div class="auth-wrapper">
-                        <div class="auth-card">
-                            <div class="auth-header">
-                                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="url(#g)" stroke-width="1.5">
-                                    <defs><linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#FFD700" /><stop offset="100%" stop-color="#D4AF37" /></linearGradient></defs>
-                                    <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"></path>
-                                </svg>
-                                <h2>AETHEL CORE</h2>
-                                <p>${isPending ? 'Verification Pending' : 'Sovereign Web Workspace'}</p>
-                            </div>
-                            
-                            ${!isPending ? `
-                                <div class="auth-form">
-                                    <label>Enter Email to Continue</label>
-                                    <input type="email" id="auth-email" placeholder="you@domain.com" autocomplete="email">
-                                    <button data-action="send-magic-link" class="btn-gold">Send Secure Verification Link</button>
-                                    <p class="auth-disclaimer">Strict Zero-PII Architecture. A verification link will be sent to your email. You cannot proceed without verifying.</p>
-                                </div>
-                            ` : `
-                                <div class="auth-pending">
-                                    <div class="pending-icon">✉️</div>
-                                    <h3>Check Your Inbox</h3>
-                                    <p>A secure access link has been sent. Click the link in your email to authorize this device.</p>
-                                    <p class="pending-sub">If you don't see it, check your spam folder.</p>
-                                    <button data-action="send-magic-link" class="btn-outline-gold" id="resend-btn" style="margin-top: 1.5rem; display: block; width: 100%;">Resend Link</button>
-                                    <input type="hidden" id="auth-email" value="">
-                                </div>
-                            `}
-                            
-                            <div class="auth-footer">
-                                <button data-action="view-privacy" class="link-btn">Privacy Policy</button> &bull; 
-                                <button data-action="view-tos" class="link-btn">Terms of Service</button>
-                            </div>
-                        </div>
-                    </div>
-                `;
-            },
-
-            dashboard(tier) {
-                const isPremium = tier === 'premium';
-                return `
-                    <nav class="top-nav">
-                        <div class="nav-brand">AETHEL CORE</div>
-                        <div class="nav-right">
-                            <span class="tier-badge ${isPremium ? 'pro' : 'free'}">${tier.toUpperCase()}</span>
-                            <button data-action="signout" class="btn-sm">Sign Out</button>
-                        </div>
-                    </nav>
-
-                    <main class="dashboard-container">
-                        <!-- Services Matrix -->
-                        <section id="free-tools" class="section-block">
-                            <h3 class="section-title">Core Utilities <span class="section-sub">(Free Tier)</span></h3>
-                            <div class="grid-3">
-                                <!-- Vault -->
-                                <div class="glass-card">
-                                    <div class="card-header"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFD700" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"></path></svg> Stateless Vault</div>
-                                    <textarea id="vault-input" class="glass-input" style="min-height: 80px;" placeholder="Enter text to locally shard and encrypt..."></textarea>
-                                    <button data-action="encrypt-vault" class="btn-gold w-100 mt-2">Encrypt & Shard</button>
-                                    <div id="vault-output" class="output-box mt-2"></div>
-                                </div>
-                                <!-- CleanStream -->
-                                <div class="glass-card">
-                                    <div class="card-header"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFD700" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg> CleanStream Engine</div>
-                                    <input type="text" id="cs-input" class="glass-input" placeholder="Enter URL to sanitize...">
-                                    <button data-action="cleanstream" class="btn-gold w-100 mt-2">Append Safe-Search</button>
-                                    <div id="cs-output" class="output-box mt-2"></div>
-                                </div>
-                                <!-- Broadcast -->
-                                <div class="glass-card">
-                                    <div class="card-header"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFD700" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg> Public Broadcast Core</div>
-                                    <div class="output-box" style="height: 120px; display: flex; align-items: center; justify-content: center;">
-                                        <span style="color: #666;">No active broadcasts. Node listening...</span>
-                                    </div>
-                                </div>
-                            </div>
-                        </section>
-
-                        <!-- Premium Tools -->
-                        <section id="premium-tools" class="section-block">
-                            <h3 class="section-title">Advanced Infrastructure <span class="section-sub">(Premium Tier)</span></h3>
-                            <div class="grid-2">
-                                <!-- P2P Tunnels -->
-                                <div class="glass-card ${isPremium ? 'active' : 'locked'}">
-                                    ${!isPremium ? '<div class="pro-badge">PRO</div>' : ''}
-                                    <div class="card-header"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFD700" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"></path></svg> P2P Node Tunnels</div>
-                                    <div class="output-box" style="height: 100px;">
-                                        ${isPremium ? 'Tunnel active. Routing obfuscated packets...' : 'Click to unlock secure P2P routing capabilities.'}
-                                    </div>
-                                    ${!isPremium ? '<button data-action="upgrade" class="btn-outline-gold w-100 mt-2">Unlock Premium</button>' : '<button class="btn-gold w-100 mt-2" disabled>Active</button>'}
-                                </div>
-                                <!-- Stealth Skinning -->
-                                <div class="glass-card ${isPremium ? 'active' : 'locked'}">
-                                    ${!isPremium ? '<div class="pro-badge">PRO</div>' : ''}
-                                    <div class="card-header"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFD700" stroke-width="2"><path d="M9 11H5a2 2 0 0 0-2 2v7h6V11zM19 11h-4v9h6v-7a2 2 0 0 0-2-2zM9 4h6v7H9z"></path></svg> Advanced UI Stealth Skinning</div>
-                                    <div class="output-box" style="height: 100px;">
-                                        ${isPremium ? 'Stealth skin active. UI fingerprint randomized.' : 'Click to unlock browser fingerprint randomization.'}
-                                    </div>
-                                    ${!isPremium ? '<button data-action="upgrade" class="btn-outline-gold w-100 mt-2">Unlock Premium</button>' : '<button class="btn-gold w-100 mt-2" disabled>Active</button>'}
-                                </div>
-                            </div>
-                        </section>
-
-                        <!-- Legal Section (Visible) -->
-                        <section id="legal-section" class="section-block">
-                            <h3 class="section-title">Legal & Compliance <span class="section-sub">(UK GDPR / DPA 2018)</span></h3>
-                            <div class="grid-2">
-                                <div class="glass-card" data-action="view-privacy" style="cursor: pointer; text-align: center;">
-                                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#FFD700" stroke-width="1.5" style="margin-bottom: 10px;"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
-                                    <h4 style="color: #FFF; margin: 0;">Privacy Policy</h4>
-                                    <p style="font-size: 0.8rem; color: #888; margin-top: 5px;">Zero Data Architecture & Traffic Logging Policy</p>
-                                </div>
-                                <div class="glass-card" data-action="view-tos" style="cursor: pointer; text-align: center;">
-                                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#FFD700" stroke-width="1.5" style="margin-bottom: 10px;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
-                                    <h4 style="color: #FFF; margin: 0;">Terms of Service</h4>
-                                    <p style="font-size: 0.8rem; color: #888; margin-top: 5px;">Decentralized Protocol & Age 17+ Liability Framework</p>
-                                </div>
-                            </div>
-                        </section>
-                    </main>
-
-                    <!-- Floating Dock (Windows/macOS style) -->
-                    <div class="floating-dock">
-                        <button class="dock-item" data-action="scroll-to" data-target="free-tools">
-                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
-                            <span>Utilities</span>
-                        </button>
-                        <button class="dock-item" data-action="scroll-to" data-target="premium-tools">
-                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"></path></svg>
-                            <span>Tunnels</span>
-                        </button>
-                        <button class="dock-item" data-action="scroll-to" data-target="legal-section">
-                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
-                            <span>Legal</span>
-                        </button>
-                        <div class="dock-divider"></div>
-                        <button class="dock-item" data-action="upgrade">
-                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
-                            <span>Upgrade</span>
-                        </button>
-                        <button class="dock-item logout" data-action="signout">
-                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
-                            <span>Logout</span>
-                        </button>
-                    </div>
-                `;
-            }
+        showDecryptedModal(title, content) {
+            const m = document.createElement('div');
+            m.className = 'modal-overlay';
+            m.innerHTML = `
+                <div class="modal-content">
+                    <h3 style="color:var(--gold-bright);margin-bottom:1rem;">${title}</h3>
+                    <pre style="color:#fff;white-space:pre-wrap;background:rgba(0,0,0,0.3);padding:1rem;border-radius:8px;">${content}</pre>
+                    <button data-action="close-modal" class="btn-gold" style="margin-top:1.5rem;width:100%;">Close & Clear Memory</button>
+                </div>`;
+            m.addEventListener('click', (e) => { if (e.target === m || e.target.dataset.action === 'close-modal') m.remove(); });
+            document.body.appendChild(m);
         }
     };
 
-    const Modules = {
-        StatelessVault: {
-            async encrypt() {
-                const text = document.getElementById('vault-input').value;
-                if (!text) return UI.showToast('Input cannot be empty.', 'error');
-                UI.showToast('Generating 256-bit AES-GCM key...', 'gold');
-                const encrypted = await CryptoEngine.encryptData(text);
-                const shards = CryptoEngine.shardData(encrypted);
-                document.getElementById('vault-output').innerHTML = `<div style="word-break: break-all; font-family: monospace; font-size: 0.8rem; color: #D4AF37;"><strong>Shards Generated:</strong> ${shards.length}<br><strong>Status:</strong> Routed to P2P nodes locally.</div>`;
-                UI.showToast('Vault encrypted and routed.', 'success');
-            }
-        },
-        CleanStream: {
-            process() {
-                const url = document.getElementById('cs-input').value;
-                if (!url) return UI.showToast('Enter a valid URL.', 'error');
-                try {
-                    const parsed = new URL(url.startsWith('http') ? url : `https://${url}`);
-                    parsed.searchParams.set('kp', '1'); 
-                    document.getElementById('cs-output').innerHTML = `<a href="${parsed.toString()}" target="_blank" style="color: #FFD700; word-break: break-all;">${parsed.toString()}</a>`;
-                    UI.showToast('URL sanitized.', 'success');
-                } catch (e) { UI.showToast('Invalid URL format.', 'error'); }
-            }
+    // --- View Templates ---
+    const AuthView = {
+        template() {
+            return `
+                <div class="auth-wrapper">
+                    <div class="auth-card">
+                        <div class="auth-header">
+                            <h2>AETHEL CORE</h2>
+                            <p>Secure Access Required</p>
+                        </div>
+                        <div class="auth-form">
+                            <input type="email" id="auth-email" class="glass-input" placeholder="Enter email address">
+                            <button data-action="send-magic-link" class="btn-gold w-100">Send Secure Link</button>
+                        </div>
+                    </div>
+                </div>
+            `;
         }
     };
 
+    const DashboardView = {
+        template() {
+            const state = State.getState();
+            return `
+                <nav class="top-nav">
+                    <span class="nav-brand">AETHEL CORE</span>
+                    <div class="nav-right">
+                        <span class="tier-badge ${state.tier}">${state.tier.toUpperCase()}</span>
+                    </div>
+                </nav>
+                <main class="container">
+                    <h2 class="page-title">Dashboard</h2>
+                    <p class="text-muted">Welcome back. Select a module to begin.</p>
+                    <div class="grid-2">
+                        <div class="glass-card nav-card" data-action="navigate" data-payload="vault">
+                            <h3>Stateless Vault</h3>
+                            <p>AES-256 Encrypted local storage.</p>
+                            <span class="link">Open Module &rarr;</span>
+                        </div>
+                        <div class="glass-card nav-card" data-action="navigate" data-payload="tools">
+                            <h3>CleanStream Tools</h3>
+                            <p>URL Sanitization & Tracking Removal.</p>
+                            <span class="link">Open Module &rarr;</span>
+                        </div>
+                    </div>
+                </main>
+                ${Layout.dock('dashboard')}
+            `;
+        }
+    };
+
+    const VaultView = {
+        template() {
+            const entries = State.getState().vaultEntries;
+            return `
+                <nav class="top-nav">
+                    <span class="nav-brand">AETHEL CORE / VAULT</span>
+                    <div class="nav-right">
+                        <button data-action="navigate" data-payload="dashboard" class="btn-sm">Back</button>
+                    </div>
+                </nav>
+                <main class="container">
+                    <h2 class="page-title">Encrypted Vault</h2>
+                    <div class="grid-2">
+                        <div class="glass-card">
+                            <h3>New Entry</h3>
+                            <input type="text" id="vault-title" class="glass-input mb-1" placeholder="Title">
+                            <textarea id="vault-content" class="glass-input mb-1" style="min-height:120px;" placeholder="Secret text..."></textarea>
+                            <button data-action="save-vault" class="btn-gold w-100">Encrypt & Save</button>
+                        </div>
+                        <div class="glass-card">
+                            <h3>Saved Entries (${entries.length})</h3>
+                            <div class="entry-list">
+                                ${entries.length === 0 ? '<p class="text-muted">No entries found.</p>' : 
+                                  entries.map(e => `
+                                    <div class="vault-entry">
+                                        <div>
+                                            <strong>${e.title}</strong>
+                                            <small>${new Date(e.timestamp).toLocaleString()}</small>
+                                        </div>
+                                        <div class="entry-actions">
+                                            <button data-action="decrypt-vault" data-payload="${e.id}" class="btn-sm">Decrypt</button>
+                                            <button data-action="delete-vault" data-payload="${e.id}" class="btn-sm danger">Del</button>
+                                        </div>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    </div>
+                </main>
+                ${Layout.dock('vault')}
+            `;
+        },
+        onMount() { VaultModule.initKey(); }
+    };
+
+    const ToolsView = {
+        template() {
+            return `
+                <nav class="top-nav">
+                    <span class="nav-brand">AETHEL CORE / TOOLS</span>
+                    <div class="nav-right">
+                        <button data-action="navigate" data-payload="dashboard" class="btn-sm">Back</button>
+                    </div>
+                </nav>
+                <main class="container">
+                    <h2 class="page-title">CleanStream URL Sanitizer</h2>
+                    <div class="glass-card">
+                        <p class="text-muted">Strips UTM tags, tracking pixels, and enforces safe search.</p>
+                        <input type="text" id="url-input" class="glass-input mb-1" placeholder="Paste messy URL here...">
+                        <button data-action="sanitize-url" class="btn-gold w-100">Sanitize URL</button>
+                        <div id="url-output" class="output-box mt-2"></div>
+                    </div>
+                </main>
+                ${Layout.dock('tools')}
+            `;
+        }
+    };
+
+    const SettingsView = {
+        template() {
+            return `
+                <nav class="top-nav">
+                    <span class="nav-brand">AETHEL CORE / SETTINGS</span>
+                </nav>
+                <main class="container">
+                    <h2 class="page-title">Settings</h2>
+                    <div class="glass-card">
+                        <h3>Session Management</h3>
+                        <button data-action="signout" class="btn-outline-gold w-100">Terminate Session & Sign Out</button>
+                    </div>
+                </main>
+                ${Layout.dock('settings')}
+            `;
+        }
+    };
+
+    // --- Layout Partials ---
+    const Layout = {
+        dock(active) {
+            return `
+                <div class="floating-dock">
+                    <button class="dock-item ${active==='dashboard'?'active':''}" data-action="navigate" data-payload="dashboard">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg>
+                        <span>Home</span>
+                    </button>
+                    <button class="dock-item ${active==='vault'?'active':''}" data-action="navigate" data-payload="vault">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+                        <span>Vault</span>
+                    </button>
+                    <button class="dock-item ${active==='tools'?'active':''}" data-action="navigate" data-payload="tools">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                        <span>Tools</span>
+                    </button>
+                    <div class="dock-divider"></div>
+                    <button class="dock-item ${active==='settings'?'active':''}" data-action="navigate" data-payload="settings">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
+                        <span>Logout</span>
+                    </button>
+                </div>
+            `;
+        }
+    };
+
+    // --- Initialization ---
     function init() {
         if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => navigator.serviceWorker.register('./service-worker.js').catch(err => console.error(err)));
+            window.addEventListener('load', () => navigator.serviceWorker.register('./service-worker.js').catch(console.error));
         }
-        document.body.insertAdjacentHTML('beforeend', window.AethelLegal.consentBanner);
-        AuthRouter.init();
-        UI.init();
+        UI.bindEvents();
+        Auth.init();
+        Router.init();
     }
 
     return { init };
