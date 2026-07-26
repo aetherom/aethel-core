@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+
+# Aethel Core - Sovereign Web Workspace
+Sitemap: https://your-domain.com/sitemap.xml
