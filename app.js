@@ -1,13 +1,12 @@
 /**
  * Aethel Core - Master Application Logic
- * Version: 2.0 (Real Auth & UI Fixes)
+ * Version: 3.0 (Strict Auth, Floating Dock, Transparent UI)
  */
 
 window.AethelCore = (function() {
     'use strict';
 
     const CONFIG = {
-        // REPLACE THESE WITH YOUR ACTUAL SUPABASE CREDENTIALS
         supabaseUrl: 'https://YOUR_PROJECT.supabase.co',
         supabaseKey: 'YOUR_ANON_KEY',
         stripeCheckoutUrl: 'https://buy.stripe.com/YOUR_LINK',
@@ -16,7 +15,7 @@ window.AethelCore = (function() {
 
     const state = {
         currentUser: null,
-        tier: 'unverified',
+        tier: 'unverified', // unverified -> pending -> free -> premium
         sessionKey: null
     };
 
@@ -66,9 +65,10 @@ window.AethelCore = (function() {
             if (window.supabase && !CONFIG.supabaseUrl.includes('YOUR_PROJECT')) {
                 supabaseClient = window.supabase.createClient(CONFIG.supabaseUrl, CONFIG.supabaseKey);
                 this.listenForAuthChanges();
-                this.handleRedirectCallback();
+                this.checkInitialSession();
             } else {
                 console.warn('Supabase not configured. Running in mock mode.');
+                UI.renderState('unverified');
             }
         },
 
@@ -84,15 +84,13 @@ window.AethelCore = (function() {
             });
         },
 
-        handleRedirectCallback() {
-            // Catches the Supabase magic link redirect
-            supabaseClient.auth.getSession().then(({ data }) => {
-                if (data.session) {
-                    this.handleUserSession(data.session.user);
-                } else {
-                    UI.renderState('unverified');
-                }
-            });
+        async checkInitialSession() {
+            const { data, error } = await supabaseClient.auth.getSession();
+            if (data.session) {
+                this.handleUserSession(data.session.user);
+            } else {
+                UI.renderState('unverified');
+            }
         },
 
         async sendMagicLink(email) {
@@ -102,13 +100,9 @@ window.AethelCore = (function() {
             }
 
             if (!supabaseClient) {
-                // Mock fallback for testing without Supabase
-                UI.showToast('Mock mode: Simulating email verification...', 'gold');
-                setTimeout(() => {
-                    state.currentUser = { email };
-                    state.tier = 'free';
-                    UI.renderState('free');
-                }, 1500);
+                // Mock fallback for local testing without Supabase
+                UI.showToast('Mock mode: Simulating strict email verification...', 'gold');
+                UI.renderState('pending'); // Force pending state
                 return;
             }
 
@@ -117,12 +111,11 @@ window.AethelCore = (function() {
                 const { error } = await supabaseClient.auth.signInWithOtp({
                     email: email,
                     options: {
-                        emailRedirectTo: window.location.origin // Redirects back to your Cloudflare URL
+                        emailRedirectTo: window.location.origin
                     }
                 });
                 if (error) throw error;
-                UI.showToast('Verification link sent! Check your email.', 'success');
-                document.getElementById('auth-status').innerHTML = `<div class="alert alert-success" style="margin-top: 1rem; background: rgba(212, 175, 55, 0.1); border: 1px solid #D4AF37; color: #FFD700;">Check your inbox to complete authentication.</div>`;
+                UI.renderState('pending'); // Force pending state until email is clicked
             } catch (error) {
                 UI.showToast(error.message, 'error');
             }
@@ -171,9 +164,12 @@ window.AethelCore = (function() {
             document.body.addEventListener('click', (e) => {
                 const action = e.target.closest('[data-action]')?.dataset.action;
                 if (!action) return;
+                
+                const email = document.getElementById('auth-email')?.value;
+
                 switch(action) {
                     case 'send-magic-link': 
-                        AuthRouter.sendMagicLink(document.getElementById('auth-email').value);
+                        AuthRouter.sendMagicLink(email);
                         break;
                     case 'signout':
                         AuthRouter.signOut();
@@ -193,113 +189,189 @@ window.AethelCore = (function() {
                     case 'view-tos':
                         this.renderModal('Terms of Service', window.AethelLegal.termsOfService);
                         break;
+                    case 'scroll-to':
+                        const target = document.getElementById(e.target.closest('[data-target]').dataset.target);
+                        if(target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                        break;
                 }
             });
         },
         renderState(tier) {
             state.tier = tier;
-            let html = tier === 'unverified' ? this.templates.authScreen() : this.templates.dashboard(tier);
+            let html = '';
+            if (tier === 'unverified' || tier === 'pending') {
+                html = this.templates.authScreen(tier);
+            } else {
+                html = this.templates.dashboard(tier);
+            }
             this.elements.appRoot.innerHTML = html;
         },
         showToast(message, type = 'success') {
             const colors = { success: '#D4AF37', error: '#ff4d4d', gold: '#FFD700' };
             const toast = document.createElement('div');
-            toast.style.cssText = `position: fixed; bottom: 20px; right: 20px; background: rgba(26, 26, 24, 0.95); backdrop-filter: blur(12px); border: 1px solid ${colors[type]}; color: ${colors[type]}; padding: 1rem 1.5rem; border-radius: 8px; z-index: 10000; box-shadow: 0 4px 20px rgba(0,0,0,0.5); transition: transform 0.3s; transform: translateX(120%);`;
+            toast.className = 'aethel-toast';
+            toast.style.borderColor = colors[type];
+            toast.style.color = colors[type];
             toast.innerText = message;
             document.body.appendChild(toast);
-            setTimeout(() => toast.style.transform = 'translateX(0)', 50);
-            setTimeout(() => { toast.style.transform = 'translateX(120%)'; setTimeout(() => toast.remove(), 300); }, 3500);
+            setTimeout(() => toast.classList.add('show'), 50);
+            setTimeout(() => { toast.classList.remove('show'); setTimeout(() => toast.remove(), 300); }, 3500);
         },
         renderModal(title, content) {
             const modal = document.createElement('div');
-            modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.8);backdrop-filter:blur(8px);z-index:9998;display:flex;align-items:center;justify-content:center;padding:2rem;';
-            modal.innerHTML = `<div class="aethel-glass-panel" style="max-width:800px;width:100%;max-height:85vh;overflow-y:auto;padding:2rem;position:relative;"><button data-action="close-modal" style="position:absolute;top:1rem;right:1rem;background:none;border:none;color:#FFD700;font-size:1.5rem;cursor:pointer;">&times;</button>${content}</div>`;
+            modal.className = 'aethel-modal-overlay';
+            modal.innerHTML = `<div class="aethel-modal-content">${content}<button data-action="close-modal" class="modal-close-btn">&times;</button></div>`;
             modal.addEventListener('click', (e) => { if (e.target === modal || e.target.dataset.action === 'close-modal') modal.remove(); });
             document.body.appendChild(modal);
         },
         templates: {
-            authScreen() {
+            authScreen(status) {
+                const isPending = status === 'pending';
                 return `
-                    <div class="auth-container">
-                        <div class="aethel-glass-panel auth-card">
-                            <div class="text-center mb-4">
-                                <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="url(#gold-gradient)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="mb-3">
-                                    <defs><linearGradient id="gold-gradient" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" style="stop-color:#FFD700;stop-opacity:1" /><stop offset="100%" style="stop-color:#D4AF37;stop-opacity:1" /></linearGradient></defs>
+                    <div class="auth-wrapper">
+                        <div class="auth-card">
+                            <div class="auth-header">
+                                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="url(#g)" stroke-width="1.5">
+                                    <defs><linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#FFD700" /><stop offset="100%" stop-color="#D4AF37" /></linearGradient></defs>
                                     <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"></path>
                                 </svg>
-                                <h2 class="auth-title">AETHEL CORE</h2>
-                                <p class="auth-subtitle">Sovereign Web Workspace</p>
+                                <h2>AETHEL CORE</h2>
+                                <p>${isPending ? 'Verification Pending' : 'Sovereign Web Workspace'}</p>
                             </div>
-                            <div class="auth-form">
-                                <label class="auth-label">Email Address</label>
-                                <input type="email" id="auth-email" class="auth-input" placeholder="you@domain.com" autocomplete="email">
-                                <button data-action="send-magic-link" class="auth-btn-primary">Send Secure Verification Link</button>
-                                <div id="auth-status"></div>
-                                <p class="auth-disclaimer">We use passwordless WebAuthn standards. No passwords are stored. Zero-PII architecture.</p>
-                                <div class="auth-links">
-                                    <button data-action="view-privacy" class="auth-link">Privacy Policy</button> &bull; 
-                                    <button data-action="view-tos" class="auth-link">Terms of Service</button>
+                            
+                            ${!isPending ? `
+                                <div class="auth-form">
+                                    <label>Enter Email to Continue</label>
+                                    <input type="email" id="auth-email" placeholder="you@domain.com" autocomplete="email">
+                                    <button data-action="send-magic-link" class="btn-gold">Send Secure Verification Link</button>
+                                    <p class="auth-disclaimer">Strict Zero-PII Architecture. A verification link will be sent to your email. You cannot proceed without verifying.</p>
                                 </div>
+                            ` : `
+                                <div class="auth-pending">
+                                    <div class="pending-icon">✉️</div>
+                                    <h3>Check Your Inbox</h3>
+                                    <p>A secure access link has been sent. Click the link in your email to authorize this device.</p>
+                                    <p class="pending-sub">If you don't see it, check your spam folder.</p>
+                                    <button data-action="send-magic-link" class="btn-outline-gold" id="resend-btn" style="margin-top: 1.5rem; display: block; width: 100%;">Resend Link</button>
+                                    <input type="hidden" id="auth-email" value="">
+                                </div>
+                            `}
+                            
+                            <div class="auth-footer">
+                                <button data-action="view-privacy" class="link-btn">Privacy Policy</button> &bull; 
+                                <button data-action="view-tos" class="link-btn">Terms of Service</button>
                             </div>
                         </div>
                     </div>
                 `;
             },
+
             dashboard(tier) {
                 const isPremium = tier === 'premium';
                 return `
-                    <nav class="aethel-navbar">
-                        <div class="d-flex justify-content-between align-items-center w-100">
-                            <span class="nav-brand">AETHEL CORE</span>
-                            <div class="d-flex align-items-center">
-                                <span class="tier-badge ${isPremium ? 'premium' : ''}">${tier.toUpperCase()}</span>
-                                <button data-action="signout" class="btn-sm auth-btn-secondary ms-3">Sign Out</button>
-                            </div>
+                    <nav class="top-nav">
+                        <div class="nav-brand">AETHEL CORE</div>
+                        <div class="nav-right">
+                            <span class="tier-badge ${isPremium ? 'pro' : 'free'}">${tier.toUpperCase()}</span>
+                            <button data-action="signout" class="btn-sm">Sign Out</button>
                         </div>
                     </nav>
-                    <div class="container py-5">
-                        <h3 class="section-title">Services Matrix</h3>
-                        <div class="row g-4 mb-5">
-                            <div class="col-md-4">
-                                <div class="aethel-card h-100">
-                                    <div class="card-header-gold">Stateless Vault</div>
-                                    <textarea id="vault-input" class="aethel-textarea" placeholder="Enter text to locally shard and encrypt..."></textarea>
-                                    <button data-action="encrypt-vault" class="auth-btn-primary w-100 mt-2">Encrypt & Shard</button>
-                                    <div id="vault-output" class="aethel-output mt-2"></div>
+
+                    <main class="dashboard-container">
+                        <!-- Services Matrix -->
+                        <section id="free-tools" class="section-block">
+                            <h3 class="section-title">Core Utilities <span class="section-sub">(Free Tier)</span></h3>
+                            <div class="grid-3">
+                                <!-- Vault -->
+                                <div class="glass-card">
+                                    <div class="card-header"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFD700" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"></path></svg> Stateless Vault</div>
+                                    <textarea id="vault-input" class="glass-input" style="min-height: 80px;" placeholder="Enter text to locally shard and encrypt..."></textarea>
+                                    <button data-action="encrypt-vault" class="btn-gold w-100 mt-2">Encrypt & Shard</button>
+                                    <div id="vault-output" class="output-box mt-2"></div>
+                                </div>
+                                <!-- CleanStream -->
+                                <div class="glass-card">
+                                    <div class="card-header"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFD700" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg> CleanStream Engine</div>
+                                    <input type="text" id="cs-input" class="glass-input" placeholder="Enter URL to sanitize...">
+                                    <button data-action="cleanstream" class="btn-gold w-100 mt-2">Append Safe-Search</button>
+                                    <div id="cs-output" class="output-box mt-2"></div>
+                                </div>
+                                <!-- Broadcast -->
+                                <div class="glass-card">
+                                    <div class="card-header"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFD700" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg> Public Broadcast Core</div>
+                                    <div class="output-box" style="height: 120px; display: flex; align-items: center; justify-content: center;">
+                                        <span style="color: #666;">No active broadcasts. Node listening...</span>
+                                    </div>
                                 </div>
                             </div>
-                            <div class="col-md-4">
-                                <div class="aethel-card h-100">
-                                    <div class="card-header-gold">CleanStream Engine</div>
-                                    <input type="text" id="cs-input" class="auth-input" placeholder="Enter URL to sanitize...">
-                                    <button data-action="cleanstream" class="auth-btn-primary w-100 mt-2">Append Safe-Search</button>
-                                    <div id="cs-output" class="aethel-output mt-2"></div>
+                        </section>
+
+                        <!-- Premium Tools -->
+                        <section id="premium-tools" class="section-block">
+                            <h3 class="section-title">Advanced Infrastructure <span class="section-sub">(Premium Tier)</span></h3>
+                            <div class="grid-2">
+                                <!-- P2P Tunnels -->
+                                <div class="glass-card ${isPremium ? 'active' : 'locked'}">
+                                    ${!isPremium ? '<div class="pro-badge">PRO</div>' : ''}
+                                    <div class="card-header"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFD700" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"></path></svg> P2P Node Tunnels</div>
+                                    <div class="output-box" style="height: 100px;">
+                                        ${isPremium ? 'Tunnel active. Routing obfuscated packets...' : 'Click to unlock secure P2P routing capabilities.'}
+                                    </div>
+                                    ${!isPremium ? '<button data-action="upgrade" class="btn-outline-gold w-100 mt-2">Unlock Premium</button>' : '<button class="btn-gold w-100 mt-2" disabled>Active</button>'}
+                                </div>
+                                <!-- Stealth Skinning -->
+                                <div class="glass-card ${isPremium ? 'active' : 'locked'}">
+                                    ${!isPremium ? '<div class="pro-badge">PRO</div>' : ''}
+                                    <div class="card-header"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFD700" stroke-width="2"><path d="M9 11H5a2 2 0 0 0-2 2v7h6V11zM19 11h-4v9h6v-7a2 2 0 0 0-2-2zM9 4h6v7H9z"></path></svg> Advanced UI Stealth Skinning</div>
+                                    <div class="output-box" style="height: 100px;">
+                                        ${isPremium ? 'Stealth skin active. UI fingerprint randomized.' : 'Click to unlock browser fingerprint randomization.'}
+                                    </div>
+                                    ${!isPremium ? '<button data-action="upgrade" class="btn-outline-gold w-100 mt-2">Unlock Premium</button>' : '<button class="btn-gold w-100 mt-2" disabled>Active</button>'}
                                 </div>
                             </div>
-                            <div class="col-md-4">
-                                <div class="aethel-card h-100">
-                                    <div class="card-header-gold">Public Broadcast Core</div>
-                                    <div class="aethel-output" style="height: 120px;">No active broadcasts. Node listening...</div>
+                        </section>
+
+                        <!-- Legal Section (Visible) -->
+                        <section id="legal-section" class="section-block">
+                            <h3 class="section-title">Legal & Compliance <span class="section-sub">(UK GDPR / DPA 2018)</span></h3>
+                            <div class="grid-2">
+                                <div class="glass-card" data-action="view-privacy" style="cursor: pointer; text-align: center;">
+                                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#FFD700" stroke-width="1.5" style="margin-bottom: 10px;"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+                                    <h4 style="color: #FFF; margin: 0;">Privacy Policy</h4>
+                                    <p style="font-size: 0.8rem; color: #888; margin-top: 5px;">Zero Data Architecture & Traffic Logging Policy</p>
+                                </div>
+                                <div class="glass-card" data-action="view-tos" style="cursor: pointer; text-align: center;">
+                                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#FFD700" stroke-width="1.5" style="margin-bottom: 10px;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+                                    <h4 style="color: #FFF; margin: 0;">Terms of Service</h4>
+                                    <p style="font-size: 0.8rem; color: #888; margin-top: 5px;">Decentralized Protocol & Age 17+ Liability Framework</p>
                                 </div>
                             </div>
-                        </div>
-                        <h3 class="section-title">Premium Tunnels</h3>
-                        <div class="row g-4">
-                            <div class="col-md-6">
-                                <div class="aethel-card h-100 ${!isPremium ? 'locked' : ''}">
-                                    <div class="card-header-gold">P2P Node Tunnels</div>
-                                    ${!isPremium ? '<div class="lock-overlay" data-action="upgrade"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#FFD700" stroke-width="1.5"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg><span>Upgrade to Premium</span></div>' : ''}
-                                    <div class="aethel-output" style="height: 150px;">${isPremium ? 'Tunnel active. Routing obfuscated packets...' : 'Access restricted.'}</div>
-                                </div>
-                            </div>
-                            <div class="col-md-6">
-                                <div class="aethel-card h-100 ${!isPremium ? 'locked' : ''}">
-                                    <div class="card-header-gold">Advanced UI Stealth Skinning</div>
-                                    ${!isPremium ? '<div class="lock-overlay" data-action="upgrade"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#FFD700" stroke-width="1.5"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg><span>Upgrade to Premium</span></div>' : ''}
-                                    <div class="aethel-output" style="height: 150px;">${isPremium ? 'Stealth skin active. UI fingerprint randomized.' : 'Access restricted.'}</div>
-                                </div>
-                            </div>
-                        </div>
+                        </section>
+                    </main>
+
+                    <!-- Floating Dock (Windows/macOS style) -->
+                    <div class="floating-dock">
+                        <button class="dock-item" data-action="scroll-to" data-target="free-tools">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+                            <span>Utilities</span>
+                        </button>
+                        <button class="dock-item" data-action="scroll-to" data-target="premium-tools">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"></path></svg>
+                            <span>Tunnels</span>
+                        </button>
+                        <button class="dock-item" data-action="scroll-to" data-target="legal-section">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+                            <span>Legal</span>
+                        </button>
+                        <div class="dock-divider"></div>
+                        <button class="dock-item" data-action="upgrade">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
+                            <span>Upgrade</span>
+                        </button>
+                        <button class="dock-item logout" data-action="signout">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
+                            <span>Logout</span>
+                        </button>
                     </div>
                 `;
             }
