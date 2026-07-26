@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="description" content="Enterprise-Grade Decentralized Privacy-Preserving Web Workspace with Sovereign Local WebCrypto Sharding.">
+    
+    <!-- PWA Meta Tags -->
+    <meta name="theme-color" content="#0D0D0C">
+    <link rel="manifest" href="./manifest.json">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Aethel Core">
+    <link rel="apple-touch-icon" href="./assets/icon-192.png">
+    
+    <title>Aethel Core | Sovereign Web Workspace</title>
+
+    <!-- Bootstrap 5 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    
+    <!-- Google Fonts: Space Grotesk & Inter for Gen Z Luxury feel -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;700;800&display=swap" rel="stylesheet">
+
+    <style>
+        :root {
+            --obsidian: #0D0D0C;
+            --charcoal: #1A1A18;
+            --gold-bright: #FFD700;
+            --gold-deep: #D4AF37;
+            --text-main: #E0E0DC;
+            --text-muted: #8A8A85;
+            --border-subtle: rgba(255, 255, 255, 0.08);
+            --glass-bg: rgba(26, 26, 24, 0.65);
+        }
+
+        * {
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            background-color: var(--obsidian);
+            color: var(--text-main);
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            padding: 0;
+            min-height: 100vh;
+            overflow-x: hidden;
+            background-image: 
+                radial-gradient(circle at 15% 50%, rgba(255, 215, 0, 0.03) 0%, transparent 25%),
+                radial-gradient(circle at 85% 30%, rgba(212, 175, 55, 0.04) 0%, transparent 20%);
+        }
+
+        h1, h2, h3, h4, h5, .legal-title {
+            font-family: 'Space Grotesk', sans-serif;
+        }
+
+        /* Glassmorphism Panels */
+        .aethel-glass-panel {
+            background: var(--glass-bg);
+            backdrop-filter: blur(16px) saturate(180%);
+            -webkit-backdrop-filter: blur(16px) saturate(180%);
+            border: 1px solid var(--border-subtle);
+            border-radius: 16px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .aethel-glass-panel::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, rgba(255, 215, 0, 0.5), transparent);
+        }
+
+        /* Typography & Links */
+        .aethel-link {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            transition: color 0.3s ease;
+            font-size: 0.85rem;
+            padding: 0;
+        }
+        .aethel-link:hover {
+            color: var(--gold-bright);
+        }
+
+        /* Form Elements */
+        .aethel-input, .aethel-textarea {
+            background: rgba(0, 0, 0, 0.4);
+            border: 1px solid var(--border-subtle);
+            color: var(--text-main);
+            border-radius: 8px;
+            padding: 0.85rem 1rem;
+            width: 100%;
+            transition: all 0.3s ease;
+            font-size: 0.95rem;
+        }
+        .aethel-input:focus, .aethel-textarea:focus {
+            background: rgba(0, 0, 0, 0.6);
+            border-color: var(--gold-deep);
+            box-shadow: 0 0 0 3px rgba(212, 175, 55, 0.15);
+            outline: none;
+        }
+        .aethel-input::placeholder, .aethel-textarea::placeholder {
+            color: #555;
+        }
+        .aethel-textarea {
+            min-height: 100px;
+            resize: vertical;
+        }
+
+        /* Buttons */
+        .aethel-btn-primary {
+            background: linear-gradient(135deg, var(--gold-bright), var(--gold-deep));
+            color: var(--obsidian);
+            border: none;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            padding: 0.85rem 1.5rem;
+            border-radius: 8px;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(255, 215, 0, 0.2);
+            position: relative;
+            overflow: hidden;
+        }
+        .aethel-btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(255, 215, 0, 0.4);
+            color: var(--obsidian);
+        }
+        .aethel-btn-primary:active {
+            transform: translateY(0);
+        }
+
+        .aethel-btn-secondary {
+            background: transparent;
+            color: var(--gold-deep);
+            border: 1px solid var(--gold-deep);
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            padding: 0.85rem 1.5rem;
+            border-radius: 8px;
+            transition: all 0.3s ease;
+        }
+        .aethel-btn-secondary:hover {
+            background: rgba(212, 175, 55, 0.1);
+            color: var(--gold-bright);
+            border-color: var(--gold-bright);
+        }
+
+        /* Navbar */
+        .aethel-navbar {
+            background: rgba(13, 13, 12, 0.85);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border-bottom: 1px solid var(--border-subtle);
+            padding: 1rem 2rem;
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+        }
+
+        /* Dashboard Cards */
+        .aethel-card {
+            background: var(--glass-bg);
+            border: 1px solid var(--border-subtle);
+            border-radius: 16px;
+            padding: 1.5rem;
+            position: relative;
+            overflow: hidden;
+            transition: border-color 0.3s ease;
+        }
+        .aethel-card:hover {
+            border-color: rgba(255, 215, 0, 0.2);
+        }
+        .aethel-card.locked {
+            filter: grayscale(0.8) brightness(0.6);
+        }
+        .aethel-card.locked:hover {
+            filter: grayscale(0.8) brightness(0.8);
+        }
+
+        .card-header-gold {
+            color: var(--gold-bright);
+            font-weight: 700;
+            margin-bottom: 1.2rem;
+            text-transform: uppercase;
+            font-size: 0.9rem;
+            letter-spacing: 1.5px;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-family: 'Space Grotesk', sans-serif;
+        }
+
+        .aethel-output {
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px dashed var(--border-subtle);
+            border-radius: 8px;
+            padding: 0.75rem;
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            word-break: break-all;
+            min-height: 45px;
+        }
+
+        /* Lock Overlay for Premium */
+        .lock-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(13, 13, 12, 0.7);
+            backdrop-filter: blur(4px);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            z-index: 10;
+        }
+        .lock-overlay:hover {
+            background: rgba(13, 13, 12, 0.5);
+        }
+        .lock-overlay svg {
+            filter: drop-shadow(0 0 8px rgba(255, 215, 0, 0.4));
+            margin-bottom: 1rem;
+        }
+        .lock-overlay span {
+            color: var(--gold-bright);
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            font-size: 0.85rem;
+            background: var(--obsidian);
+            padding: 0.5rem 1rem;
+            border: 1px solid var(--gold-bright);
+            border-radius: 4px;
+        }
+
+        /* Badges */
+        .aethel-badge {
+            padding: 0.35rem 0.8rem;
+            border-radius: 20px;
+            font-size: 0.7rem;
+            font-weight: 700;
+            background: rgba(255, 255, 255, 0.1);
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .aethel-badge.premium {
+            background: rgba(255, 215, 0, 0.15);
+            color: var(--gold-bright);
+            border: 1px solid var(--gold-deep);
+            box-shadow: 0 0 10px rgba(255, 215, 0, 0.1);
+        }
+
+        /* Loading State */
+        #app-loader {
+            position: fixed;
+            inset: 0;
+            background: var(--obsidian);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+            transition: opacity 0.5s ease;
+        }
+        .loader-svg {
+            animation: spin 3s linear infinite;
+        }
+        @keyframes spin {
+            100% { transform: rotate(360deg); }
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: var(--obsidian);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: var(--charcoal);
+            border-radius: 10px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--gold-deep);
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Application Root -->
+    <div id="app-root">
+        <!-- Initial Loader injected before JS takes over -->
+        <div id="app-loader">
+            <svg class="loader-svg" width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="#FFD700" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"></path>
+            </svg>
+            <h5 style="color: #FFD700; margin-top: 2rem; font-family: 'Space Grotesk', sans-serif; letter-spacing: 2px;">INITIALIZING SECURE NODE</h5>
+        </div>
+    </div>
+
+    <!-- Supabase JS Client (Required by app.js) -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    
+    <!-- Bootstrap 5 JS Bundle -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+
+    <!-- Aethel Core Modules -->
+    <script src="./legal-text.js"></script>
+    <script src="./app.js"></script>
+</body>
+</html>
