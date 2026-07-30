@@ -328,14 +328,12 @@ window.AethelCore = (function() {
                 resultsDiv.innerHTML = `<div class="threat-item">${Icons.scan} Error: ${err.message}</div>`;
             }
         },
-
         async downloadMedia(url) {
             const resultsDiv = document.getElementById('url-results');
             try {
-                resultsDiv.innerHTML = `<div class="progress-bar"><div class="progress-fill" style="width: 50%"></div></div><p class="text-muted">Extracting media...</p>`;
+                resultsDiv.innerHTML = `<div class="progress-bar"><div class="progress-fill" style="width: 50%"></div></div><p class="text-muted">Extracting media via Cobalt API...</p>`;
                 
-                // Using the official Cobalt API /json endpoint
-                const res = await fetch('https://api.cobalt.tools/json', {
+                const res = await fetch('https://api.cobalt.tools/', {
                     method: 'POST',
                     headers: { 
                         'Accept': 'application/json', 
@@ -344,11 +342,13 @@ window.AethelCore = (function() {
                     body: JSON.stringify({ url: url })
                 });
 
-                if (!res.ok) {
-                    throw new Error(`API rejected request (Status ${res.status}). Ensure the link is a valid video/audio URL.`);
-                }
+                // Try to parse the JSON response regardless of success or error
+                const data = await res.json().catch(() => null);
 
-                const data = await res.json();
+                if (!res.ok || !data) {
+                    const errorMsg = data?.error?.code || `API rejected request (Status ${res.status}). The link might be invalid, rate-limited, or unsupported.`;
+                    throw new Error(errorMsg);
+                }
 
                 if (data.status === 'redirect' || data.status === 'stream' || data.status === 'tunnel') {
                     resultsDiv.innerHTML = `
@@ -360,7 +360,6 @@ window.AethelCore = (function() {
                         </div>
                     `;
                 } else if (data.status === 'picker') {
-                    // Handle cases where there are multiple files (like a page of images)
                     let pickerHtml = data.picker.map(item => 
                         `<a href="${item.url}" target="_blank" class="btn btn-outline btn-sm" style="margin:0.25rem; text-decoration:none;">${Icons.download} ${item.type || 'File'}</a>`
                     ).join('');
@@ -372,7 +371,7 @@ window.AethelCore = (function() {
                         </div>
                     `;
                 } else {
-                    throw new Error(data?.error?.code || "Could not extract media. The link might be unsupported or rate-limited.");
+                    throw new Error(data?.error?.code || "Could not extract media. The link might be unsupported.");
                 }
             } catch (err) {
                 resultsDiv.innerHTML = `<div class="threat-item">${Icons.scan} Extraction failed: ${err.message}</div>`;
