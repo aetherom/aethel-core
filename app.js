@@ -109,10 +109,11 @@ window.AethelCore = (function() {
             `;
         },
 
-        images() { return this.mediaView('images', 'image/*', 'IMAGE CLEANER', Icons.image); },
-        audio() { return this.mediaView('audio', 'audio/*', 'AUDIO STUDIO', Icons.audio); },
-        video() { return this.mediaView('video', 'video/*', 'VIDEO STUDIO', Icons.video); },
-        docs() { return this.mediaView('docs', '.pdf,.doc,.docx,.txt', 'DOCUMENT VAULT', Icons.doc); },
+        // FIXED: Changed 'this' to 'Views' to prevent scope loss
+        images() { return Views.mediaView('images', 'image/*', 'IMAGE CLEANER', Icons.image); },
+        audio() { return Views.mediaView('audio', 'audio/*', 'AUDIO STUDIO', Icons.audio); },
+        video() { return Views.mediaView('video', 'video/*', 'VIDEO STUDIO', Icons.video); },
+        docs() { return Views.mediaView('docs', '.pdf,.doc,.docx,.txt', 'DOCUMENT VAULT', Icons.doc); },
         
         vault() {
             return `
@@ -214,7 +215,6 @@ window.AethelCore = (function() {
             const fileInput = document.getElementById('file-input');
             if (!dropZone || !fileInput) return;
 
-            // Exact same listener structure from your first working version
             dropZone.addEventListener('click', () => fileInput.click());
             fileInput.addEventListener('change', (e) => {
                 if (e.target.files.length > 0) {
@@ -227,7 +227,6 @@ window.AethelCore = (function() {
                 }
             });
 
-            // Drag & Drop
             dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
             dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
             dropZone.addEventListener('drop', (e) => {
