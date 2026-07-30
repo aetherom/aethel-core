@@ -1,10 +1,11 @@
-const CACHE_NAME = 'aethel-core-v2';
+const CACHE_NAME = 'aethel-core-e2e-v1';
 const CORE_ASSETS = [
     './',
     './index.html',
     './app.js',
     './legal-text.js',
-    './manifest.json'
+    './manifest.json',
+    './icon.svg'
 ];
 
 self.addEventListener('install', (event) => {
