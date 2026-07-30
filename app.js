@@ -14,7 +14,6 @@ window.AethelCore = (function() {
         download: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>`
     };
 
-    // --- E2E Cryptography Engine (AES-GCM 256) ---
     const CryptoEngine = {
         async generateKey() {
             const key = await window.crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]);
@@ -35,11 +34,10 @@ window.AethelCore = (function() {
         }
     };
 
-    // --- Custom JavaScript Malware Scanner ---
     const JSScanner = {
         knownMaliciousHashes: [
-            "275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f", // EICAR Test Virus
-            "131f95c51cc819465fa1797f6ccacf9d494aaaff46fa3eac73ae63ffbdfd8267"  // EICAR Variant
+            "275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f",
+            "131f95c51cc819465fa1797f6ccacf9d494aaaff46fa3eac73ae63ffbdfd8267"
         ],
         async getSHA256(file) {
             const buffer = await file.arrayBuffer();
@@ -61,11 +59,6 @@ window.AethelCore = (function() {
             if (file.name.toLowerCase().endsWith('.docx') || file.name.toLowerCase().endsWith('.xlsx')) {
                 if (textBuffer.includes('vbaProject.bin') || textBuffer.includes('vbaData.xml')) {
                     return { clean: false, threat: "VBA Macro Virus Detected" };
-                }
-            }
-            if (file.type === 'text/html' || file.name.toLowerCase().endsWith('.html')) {
-                if (textBuffer.includes('<script') && (textBuffer.includes('evil(') || textBuffer.includes('malware'))) {
-                    return { clean: false, threat: "Malicious HTML Script Detected" };
                 }
             }
             return { clean: true };
@@ -312,14 +305,12 @@ window.AethelCore = (function() {
                     ['utm_source', 'utm_medium', 'gclid', 'fbclid'].forEach(p => url.searchParams.delete(p));
                     this.showUrlResult("Sanitized URL", url.toString());
                 } else if (mode === 'shorten') {
-                    // Using a CORS proxy because is.gd blocks browser requests
                     const proxyUrl = `https://corsproxy.io/?url=${encodeURIComponent(`https://is.gd/create.php?format=simple&url=${encodeURIComponent(input)}`)}`;
                     const res = await fetch(proxyUrl);
                     const shortUrl = await res.text();
                     if(shortUrl.startsWith('Error') || shortUrl.includes('html')) throw new Error("Could not shorten URL.");
                     this.showUrlResult("Shortened URL", shortUrl.trim());
                 } else if (mode === 'reveal') {
-                    // Using a CORS proxy because allorigins blocks browser requests
                     const proxyUrl = `https://corsproxy.io/?url=${encodeURIComponent(`https://api.allorigins.win/get?url=${encodeURIComponent(input)}`)}`;
                     const res = await fetch(proxyUrl);
                     const data = await res.json();
@@ -338,7 +329,8 @@ window.AethelCore = (function() {
             try {
                 resultsDiv.innerHTML = `<div class="progress-bar"><div class="progress-fill" style="width: 50%"></div></div><p class="text-muted">Extracting media...</p>`;
                 
-                const res = await fetch('https://api.cobalt.tools/', {
+                // Using thingproxy to bypass CORS and User-Agent blocks on POST requests
+                const res = await fetch('https://thingproxy.freeboard.io/fetch/https://api.cobalt.tools/', {
                     method: 'POST',
                     headers: { 
                         'Accept': 'application/json', 
@@ -351,41 +343,6 @@ window.AethelCore = (function() {
 
                 if (!res.ok || !data) {
                     const errorMsg = data?.error?.code || `API rejected request (Status ${res.status}). The link might be invalid or rate-limited.`;
-                    throw new Error(errorMsg);
-                }
-
-                if (data.status === 'redirect' || data.status === 'stream' || data.status === 'tunnel') {
-                    resultsDiv.innerHTML = `
-                        <div class="scan-results">
-                            <div class="clear-item">${Icons.shield} Media extracted successfully! Trackers & webpage scripts stripped.</div>
-                            <p class="text-muted" style="margin: 1rem 0 0.5rem; font-size: 0.8rem;">CLEAN DIRECT DOWNLOAD LINK:</p>
-                            <div class="mono" style="color: var(--accent); word-break: break-all; background: #000; padding: 0.5rem; border-radius: 6px; margin-bottom: 1rem;">${data.url}</div>
-                            <a href="${data.url}" target="_blank" class="btn" style="text-decoration: none; display: inline-flex;">${Icons.download} Download Clean File</a>
-                        </div>
-                    `;
-                } else if (data.status === 'picker') {
-                    let pickerHtml = data.picker.map(item => 
-                        `<a href="${item.url}" target="_blank" class="btn btn-outline btn-sm" style="margin:0.25rem; text-decoration:none;">${Icons.download} ${item.type || 'File'}</a>`
-                    ).join('');
-                    resultsDiv.innerHTML = `
-                        <div class="scan-results">
-                            <div class="clear-item">${Icons.shield} Multiple media files extracted!</div>
-                            <p class="text-muted" style="margin: 1rem 0 0.5rem; font-size: 0.8rem;">Select a file to download:</p>
-                            <div style="display:flex; flex-wrap:wrap; gap:0.5rem;">${pickerHtml}</div>
-                        </div>
-                    `;
-                } else {
-                    throw new Error(data?.error?.code || "Could not extract media. The link might be unsupported.");
-                }
-            } catch (err) {
-                resultsDiv.innerHTML = `<div class="threat-item">${Icons.scan} Extraction failed: ${err.message}</div>`;
-            }
-        },
-                // Try to parse the JSON response regardless of success or error
-                const data = await res.json().catch(() => null);
-
-                if (!res.ok || !data) {
-                    const errorMsg = data?.error?.code || `API rejected request (Status ${res.status}). The link might be invalid, rate-limited, or unsupported.`;
                     throw new Error(errorMsg);
                 }
 
@@ -449,7 +406,6 @@ window.AethelCore = (function() {
                 const prog = document.getElementById('prog');
                 const status = document.getElementById('scan-status');
                 
-                // 1. Run the Custom JS Scanner
                 prog.style.width = '25%';
                 status.textContent = 'Calculating SHA-256 Cryptographic Hash...';
                 prog.style.width = '50%';
@@ -459,7 +415,6 @@ window.AethelCore = (function() {
                 
                 prog.style.width = '100%';
 
-                // 2. Handle Threat Detection
                 if (!scanResult.clean) {
                     status.innerHTML = `<span style="color:var(--danger)">⚠ THREAT DETECTED!</span>`;
                     resultsDiv.innerHTML += `
@@ -469,10 +424,9 @@ window.AethelCore = (function() {
                         </div>
                     `;
                     this.toast('Malware detected! File blocked.');
-                    return; // Stop processing entirely
+                    return;
                 }
 
-                // 3. If Clean, proceed with UI
                 status.innerHTML = `<span style="color:var(--accent)">✓ Verified Clean. No malicious signatures or macros found.</span>`;
 
                 const mediaContainer = document.getElementById('media-container');
@@ -599,7 +553,6 @@ window.AethelCore = (function() {
             if (format === 'original') {
                 a.download = `clean_${this.currentFile.name}`;
             } else {
-                this.toast(`Extracting ${format.toUpperCase()} (Saving original stream as .${format})...`);
                 a.download = `extracted_${this.currentFile.name.split('.')[0]}.${format}`;
             }
             a.click();
@@ -760,12 +713,10 @@ window.AethelCore = (function() {
     };
 
     function init() {
-        // 1. Safely clear the hash if it exists on load to prevent blank screens on reload
         if (window.location.hash) {
             history.replaceState(null, '', window.location.pathname + window.location.search);
         }
 
-        // 2. Anti-Screenshot / Screen Record Deterrents
         document.addEventListener('keydown', (e) => {
             if (e.key === 'PrintScreen' || (e.ctrlKey && (e.key === 'p' || e.key === 's'))) {
                 e.preventDefault();
@@ -790,12 +741,10 @@ window.AethelCore = (function() {
             document.body.style.filter = 'none';
         });
 
-        // 3. Register Service Worker
         if ('serviceWorker' in navigator) {
             navigator.serviceWorker.register('./service-worker.js').catch(console.error);
         }
         
-        // 4. Init UI
         UI.init();
     }
 
