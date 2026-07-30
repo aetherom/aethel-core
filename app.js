@@ -14,7 +14,6 @@ window.AethelCore = (function() {
         download: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>`
     };
 
-    // --- E2E Cryptography Engine ---
     const CryptoEngine = {
         async generateKey() {
             const key = await window.crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]);
@@ -98,7 +97,7 @@ window.AethelCore = (function() {
                 </nav>
                 <div class="container">
                     <div class="card">
-                        <div class="drop-zone" id="drop-zone" data-action="trigger-file">
+                        <div class="drop-zone" id="drop-zone">
                             ${icon}
                             <p style="margin-top: 1rem;">Drag & drop or click to upload</p>
                             <p class="text-muted" style="font-size: 0.8rem;">${accept}</p>
@@ -125,7 +124,7 @@ window.AethelCore = (function() {
                     <div class="card">
                         <h3 style="margin-bottom: 1rem;">Decrypt Encrypted Payload</h3>
                         <p class="text-muted" style="margin-bottom: 1rem;">Upload a <strong>.aethel.enc</strong> file and enter your secret key to restore the original file.</p>
-                        <div class="drop-zone" id="drop-zone" data-action="trigger-file">
+                        <div class="drop-zone" id="drop-zone">
                             ${Icons.lock}
                             <p style="margin-top: 1rem;">Upload Encrypted File</p>
                             <input type="file" id="file-input" accept=".enc,.aethel.enc" hidden>
@@ -159,7 +158,6 @@ window.AethelCore = (function() {
         }
     };
 
-    // --- UI Controller ---
     const UI = {
         root: document.getElementById('app-root'),
         currentFile: null,
@@ -167,9 +165,7 @@ window.AethelCore = (function() {
         
         init() {
             window.addEventListener('hashchange', () => this.render());
-            // Using the bulletproof global event listener from your first version
             document.body.addEventListener('click', (e) => this.handleActions(e));
-            document.body.addEventListener('change', (e) => this.handleChange(e));
             this.render();
         },
         
@@ -194,6 +190,10 @@ window.AethelCore = (function() {
                 const fileInput = document.getElementById('file-input');
                 if (fileInput) fileInput.click(); 
             }
+            else if (action === 'set-speed') {
+                const player = document.getElementById('media-player');
+                if (player) player.playbackRate = parseFloat(target.dataset.speed);
+            }
             else if (action === 'download') { this.downloadCurrentFile(); }
             else if (action === 'encrypt-file') { this.e2eEncryptFile(); }
             else if (action === 'convert-doc') { this.convertDocToPdf(); }
@@ -201,26 +201,12 @@ window.AethelCore = (function() {
             else if (action === 'clear-cache') { this.clearCache(); }
         },
         
-        handleChange(e) {
-            if (e.target.id === 'file-input' && e.target.files.length > 0) {
-                const route = window.location.hash.replace('#', '') || 'dashboard';
-                if (route === 'vault') {
-                    this.encryptedFile = e.target.files[0];
-                    document.getElementById('media-results').innerHTML = `<div class="clear-item">${Icons.lock} Encrypted file loaded: ${this.encryptedFile.name}</div>`;
-                } else {
-                    this.processFile(e.target.files[0], route);
-                }
-            }
-        },
-        
         render() {
             const route = window.location.hash.replace('#', '') || 'dashboard';
             const view = Views[route] ? Views[route] : Views.dashboard;
             this.root.innerHTML = view();
             this.attachFileListeners(route);
-            if (route === 'settings') {
-                document.getElementById('legal-container').innerHTML = window.AethelLegal.privacyPolicy;
-            }
+            if (route === 'settings') document.getElementById('legal-container').innerHTML = window.AethelLegal.privacyPolicy;
         },
         
         attachFileListeners(route) {
@@ -228,10 +214,23 @@ window.AethelCore = (function() {
             const fileInput = document.getElementById('file-input');
             if (!dropZone || !fileInput) return;
 
-            // Global drag and drop bound directly to the element when it renders
-            dropZone.ondragover = (e) => { e.preventDefault(); dropZone.classList.add('dragover'); };
-            dropZone.ondragleave = () => dropZone.classList.remove('dragover');
-            dropZone.ondrop = (e) => {
+            // Exact same listener structure from your first working version
+            dropZone.addEventListener('click', () => fileInput.click());
+            fileInput.addEventListener('change', (e) => {
+                if (e.target.files.length > 0) {
+                    if (route === 'vault') {
+                        this.encryptedFile = e.target.files[0];
+                        document.getElementById('media-results').innerHTML = `<div class="clear-item">${Icons.lock} Encrypted file loaded: ${this.encryptedFile.name}</div>`;
+                    } else {
+                        this.processFile(e.target.files[0], route);
+                    }
+                }
+            });
+
+            // Drag & Drop
+            dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
+            dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+            dropZone.addEventListener('drop', (e) => {
                 e.preventDefault();
                 dropZone.classList.remove('dragover');
                 if (e.dataTransfer.files.length > 0) {
@@ -242,16 +241,12 @@ window.AethelCore = (function() {
                         this.processFile(e.dataTransfer.files[0], route);
                     }
                 }
-            };
+            });
         },
         
         clearCache() {
-            if (caches) {
-                caches.keys().then(keys => keys.forEach(k => caches.delete(k)));
-            }
-            if ('serviceWorker' in navigator) {
-                navigator.serviceWorker.getRegistrations().then(regs => regs.forEach(reg => reg.unregister()));
-            }
+            if (caches) caches.keys().then(keys => keys.forEach(k => caches.delete(k)));
+            if ('serviceWorker' in navigator) navigator.serviceWorker.getRegistrations().then(regs => regs.forEach(reg => reg.unregister()));
             setTimeout(() => window.location.reload(), 500);
         },
         
@@ -337,16 +332,16 @@ window.AethelCore = (function() {
                 } else if (type === 'audio') {
                     mediaContainer.innerHTML = `<audio id="media-player" class="media-player" controls src="${url}"></audio>
                         <div class="speed-controls">
-                            <button class="btn btn-outline btn-sm" onclick="document.getElementById('media-player').playbackRate=0.5">0.5x</button>
-                            <button class="btn btn-outline btn-sm" onclick="document.getElementById('media-player').playbackRate=1">1x</button>
-                            <button class="btn btn-outline btn-sm" onclick="document.getElementById('media-player').playbackRate=1.5">1.5x</button>
+                            <button class="btn btn-outline btn-sm" data-action="set-speed" data-speed="0.5">0.5x</button>
+                            <button class="btn btn-outline btn-sm" data-action="set-speed" data-speed="1">1x</button>
+                            <button class="btn btn-outline btn-sm" data-action="set-speed" data-speed="1.5">1.5x</button>
                         </div>`;
                 } else if (type === 'video') {
                     mediaContainer.innerHTML = `<video id="media-player" class="media-player" controls src="${url}"></video>
                         <div class="speed-controls">
-                            <button class="btn btn-outline btn-sm" onclick="document.getElementById('media-player').playbackRate=0.5">0.5x</button>
-                            <button class="btn btn-outline btn-sm" onclick="document.getElementById('media-player').playbackRate=1">1x</button>
-                            <button class="btn btn-outline btn-sm" onclick="document.getElementById('media-player').playbackRate=2">2x</button>
+                            <button class="btn btn-outline btn-sm" data-action="set-speed" data-speed="0.5">0.5x</button>
+                            <button class="btn btn-outline btn-sm" data-action="set-speed" data-speed="1">1x</button>
+                            <button class="btn btn-outline btn-sm" data-action="set-speed" data-speed="2">2x</button>
                         </div>`;
                 } else if (type === 'docs') {
                     actionContainer.innerHTML += `<button class="btn btn-sm" data-action="convert-doc">${Icons.doc} Convert to PDF</button>`;
@@ -452,7 +447,6 @@ window.AethelCore = (function() {
         }
     };
 
-    // --- Dock Layout ---
     function renderDock() {
         const route = window.location.hash.replace('#', '') || 'dashboard';
         const items = [
@@ -476,12 +470,11 @@ window.AethelCore = (function() {
         `;
     }
 
-    // Intercept render to add dock (Fixed bug where multiple docks were appended)
     const originalRender = UI.render.bind(UI);
     UI.render = function() {
         originalRender();
         const oldDock = document.querySelector('.dock');
-        if (oldDock) oldDock.remove(); // Prevent duplicate docks
+        if (oldDock) oldDock.remove(); 
         
         const dockEl = document.createElement('div');
         dockEl.innerHTML = renderDock();
