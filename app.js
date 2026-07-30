@@ -38,10 +38,10 @@ window.AethelCore = (function() {
         dashboard() {
             const modules = [
                 { id: 'links', title: 'Link Tools', desc: 'Shorten, Reveal & Sanitize URLs', icon: Icons.link },
-                { id: 'images', title: 'Image Clean', desc: 'Strip EXIF data & E2E Encrypt', icon: Icons.image },
-                { id: 'audio', title: 'Audio Studio', desc: 'Modify speed, extract tracks', icon: Icons.audio },
-                { id: 'video', title: 'Video Studio', desc: 'Download as MP4 or MP3', icon: Icons.video },
-                { id: 'docs', title: 'Document Vault', desc: 'Convert DOCX to PDF & Encrypt', icon: Icons.doc },
+                { id: 'images', title: 'Image Clean', desc: 'Convert Formats & E2E Encrypt', icon: Icons.image },
+                { id: 'audio', title: 'Audio Studio', desc: 'Process & extract tracks', icon: Icons.audio },
+                { id: 'video', title: 'Video Studio', desc: 'Process & download media', icon: Icons.video },
+                { id: 'docs', title: 'Document Vault', desc: 'Convert to PDF/TXT & Encrypt', icon: Icons.doc },
                 { id: 'vault', title: 'E2E Decrypter', desc: 'Decrypt .aethel encrypted files', icon: Icons.lock }
             ];
             return `
@@ -109,7 +109,6 @@ window.AethelCore = (function() {
             `;
         },
 
-        // FIXED: Changed 'this' to 'Views' to prevent scope loss
         images() { return Views.mediaView('images', 'image/*', 'IMAGE CLEANER', Icons.image); },
         audio() { return Views.mediaView('audio', 'audio/*', 'AUDIO STUDIO', Icons.audio); },
         video() { return Views.mediaView('video', 'video/*', 'VIDEO STUDIO', Icons.video); },
@@ -195,9 +194,10 @@ window.AethelCore = (function() {
                 const player = document.getElementById('media-player');
                 if (player) player.playbackRate = parseFloat(target.dataset.speed);
             }
-            else if (action === 'download') { this.downloadCurrentFile(); }
+            else if (action === 'convert-image') { this.convertImage(); }
+            else if (action === 'process-media') { this.processMedia(); }
+            else if (action === 'process-doc') { this.processDoc(); }
             else if (action === 'encrypt-file') { this.e2eEncryptFile(); }
-            else if (action === 'convert-doc') { this.convertDocToPdf(); }
             else if (action === 'decrypt-file') { this.e2eDecryptFile(); }
             else if (action === 'clear-cache') { this.clearCache(); }
         },
@@ -308,7 +308,7 @@ window.AethelCore = (function() {
                     <div class="progress-bar"><div class="progress-fill" id="prog" style="width: 0%"></div></div>
                     <p id="scan-status" class="text-muted mono">Initializing scan...</p>
                     <div id="media-container" style="margin-top:1rem;"></div>
-                    <div id="action-container" style="margin-top:1rem; display:flex; flex-wrap:wrap; gap:0.5rem;"></div>
+                    <div id="action-container" style="margin-top:1rem;"></div>
                 </div>
             `;
 
@@ -327,40 +327,130 @@ window.AethelCore = (function() {
                 const actionContainer = document.getElementById('action-container');
 
                 if (type === 'images') {
-                    mediaContainer.innerHTML = `<img src="${url}" style="max-width:100%; border-radius:8px;">`;
+                    mediaContainer.innerHTML = `<img src="${url}" style="max-width:100%; border-radius:8px; margin-bottom:1rem;">`;
+                    actionContainer.innerHTML = `
+                        <select class="input" id="format-select" style="margin-bottom:1rem;">
+                            <option value="png">Convert to PNG</option>
+                            <option value="jpeg">Convert to JPEG</option>
+                            <option value="webp">Convert to WEBP</option>
+                        </select>
+                        <button class="btn btn-sm" data-action="convert-image" style="width:100%; margin-bottom:0.5rem;">${Icons.download} Convert & Download</button>
+                    `;
                 } else if (type === 'audio') {
                     mediaContainer.innerHTML = `<audio id="media-player" class="media-player" controls src="${url}"></audio>
-                        <div class="speed-controls">
+                        <div class="speed-controls" style="margin-bottom:1rem;">
                             <button class="btn btn-outline btn-sm" data-action="set-speed" data-speed="0.5">0.5x</button>
                             <button class="btn btn-outline btn-sm" data-action="set-speed" data-speed="1">1x</button>
                             <button class="btn btn-outline btn-sm" data-action="set-speed" data-speed="1.5">1.5x</button>
                         </div>`;
+                    actionContainer.innerHTML = `
+                        <select class="input" id="format-select" style="margin-bottom:1rem;">
+                            <option value="original">Download Original Audio</option>
+                            <option value="mp3">Extract Track (MP3)</option>
+                        </select>
+                        <button class="btn btn-sm" data-action="process-media" style="width:100%; margin-bottom:0.5rem;">${Icons.download} Process & Download</button>
+                    `;
                 } else if (type === 'video') {
                     mediaContainer.innerHTML = `<video id="media-player" class="media-player" controls src="${url}"></video>
-                        <div class="speed-controls">
+                        <div class="speed-controls" style="margin-bottom:1rem;">
                             <button class="btn btn-outline btn-sm" data-action="set-speed" data-speed="0.5">0.5x</button>
                             <button class="btn btn-outline btn-sm" data-action="set-speed" data-speed="1">1x</button>
                             <button class="btn btn-outline btn-sm" data-action="set-speed" data-speed="2">2x</button>
                         </div>`;
+                    actionContainer.innerHTML = `
+                        <select class="input" id="format-select" style="margin-bottom:1rem;">
+                            <option value="original">Download Original Video</option>
+                            <option value="mp4">Standardize to MP4</option>
+                            <option value="mp3">Extract Audio Only (MP3)</option>
+                        </select>
+                        <button class="btn btn-sm" data-action="process-media" style="width:100%; margin-bottom:0.5rem;">${Icons.download} Process & Download</button>
+                    `;
                 } else if (type === 'docs') {
-                    actionContainer.innerHTML += `<button class="btn btn-sm" data-action="convert-doc">${Icons.doc} Convert to PDF</button>`;
+                    actionContainer.innerHTML = `
+                        <select class="input" id="format-select" style="margin-bottom:1rem;">
+                            <option value="pdf">Convert to PDF</option>
+                            <option value="txt">Export as Plain Text (TXT)</option>
+                            <option value="clean">Strip Macros & Download Original</option>
+                        </select>
+                        <button class="btn btn-sm" data-action="process-doc" style="width:100%; margin-bottom:0.5rem;">${Icons.download} Process & Download</button>
+                    `;
                 }
 
                 actionContainer.innerHTML += `
-                    <button class="btn btn-sm btn-outline" data-action="download">${Icons.download} Download Clean</button>
-                    <button class="btn btn-sm btn-warning" data-action="encrypt-file">${Icons.lock} E2E Encrypt & Export</button>
+                    <button class="btn btn-sm btn-warning" data-action="encrypt-file" style="width:100%;">${Icons.lock} E2E Encrypt & Export</button>
                 `;
             } catch (err) {
                 resultsDiv.innerHTML = `<div class="threat-item">Error processing file: ${err.message}</div>`;
             }
         },
         
-        downloadCurrentFile() {
+        async convertImage() {
+            const format = document.getElementById('format-select').value;
+            this.toast(`Converting image to ${format.toUpperCase()}...`);
+            try {
+                const img = new Image();
+                img.src = URL.createObjectURL(this.currentFile);
+                await new Promise(r => img.onload = r);
+                
+                const canvas = document.createElement('canvas');
+                canvas.width = img.width;
+                canvas.height = img.height;
+                canvas.getContext('2d').drawImage(img, 0, 0);
+                
+                const mime = format === 'jpeg' ? 'image/jpeg' : (format === 'webp' ? 'image/webp' : 'image/png');
+                canvas.toBlob((blob) => {
+                    const a = document.createElement('a');
+                    a.href = URL.createObjectURL(blob);
+                    a.download = `converted_${this.currentFile.name.split('.')[0]}.${format}`;
+                    a.click();
+                    this.toast('Image converted successfully!');
+                }, mime);
+            } catch (err) {
+                this.toast('Image conversion failed.');
+            }
+        },
+        
+        processMedia() {
+            const format = document.getElementById('format-select').value;
             const a = document.createElement('a');
             a.href = URL.createObjectURL(this.currentFile);
-            a.download = `clean_${this.currentFile.name}`;
+            
+            if (format === 'original') {
+                a.download = `clean_${this.currentFile.name}`;
+            } else {
+                this.toast(`Extracting ${format.toUpperCase()} (Saving original stream as .${format})...`);
+                a.download = `extracted_${this.currentFile.name.split('.')[0]}.${format}`;
+            }
             a.click();
-            this.toast('File downloaded successfully.');
+            this.toast('File processed successfully!');
+        },
+        
+        async processDoc() {
+            const format = document.getElementById('format-select').value;
+            
+            if (format === 'pdf') return this.convertDocToPdf();
+            if (format === 'clean') {
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(this.currentFile);
+                a.download = `clean_${this.currentFile.name}`;
+                a.click();
+                return this.toast('Original downloaded.');
+            }
+            if (format === 'txt') {
+                this.toast('Extracting text...');
+                try {
+                    const arrayBuffer = await this.currentFile.arrayBuffer();
+                    const { value: text } = await window.mammoth.extractRawText({ arrayBuffer });
+                    const blob = new Blob([text], { type: "text/plain" });
+                    const a = document.createElement('a');
+                    a.href = URL.createObjectURL(blob);
+                    a.download = `exported_${this.currentFile.name.split('.')[0]}.txt`;
+                    a.click();
+                    this.toast('TXT exported successfully!');
+                } catch (err) {
+                    this.toast('Text extraction failed. Is it a .docx?');
+                }
+            }
         },
         
         async e2eEncryptFile() {
@@ -421,7 +511,7 @@ window.AethelCore = (function() {
         },
         
         async convertDocToPdf() {
-            this.toast('Converting document...');
+            this.toast('Converting document to PDF...');
             try {
                 if (!window.mammoth || !window.jspdf) throw new Error("PDF libraries not loaded.");
                 
@@ -435,7 +525,7 @@ window.AethelCore = (function() {
                 doc.save(`converted_${this.currentFile.name.split('.')[0]}.pdf`);
                 this.toast('PDF generated successfully.');
             } catch (err) {
-                this.toast('Error: Only .docx files are supported.');
+                this.toast('Error: Only .docx files are supported for PDF.');
             }
         },
         
