@@ -37,11 +37,11 @@ window.AethelCore = (function() {
     const Views = {
         dashboard() {
             const modules = [
-                { id: 'links', title: 'Link Tools', desc: 'Shorten, Reveal & Sanitize URLs', icon: Icons.link },
-                { id: 'images', title: 'Image Clean', desc: 'Convert Formats & E2E Encrypt', icon: Icons.image },
+                { id: 'links', title: 'Link Tools', desc: 'Sanitize, Reveal & Download Clean Media', icon: Icons.link },
+                { id: 'images', title: 'Image Clean', desc: 'Convert to PDF/Word & E2E Encrypt', icon: Icons.image },
                 { id: 'audio', title: 'Audio Studio', desc: 'Process & extract tracks', icon: Icons.audio },
                 { id: 'video', title: 'Video Studio', desc: 'Process & download media', icon: Icons.video },
-                { id: 'docs', title: 'Document Vault', desc: 'Convert to PDF/TXT & Encrypt', icon: Icons.doc },
+                { id: 'docs', title: 'Document Vault', desc: 'Convert to PDF/Word/TXT & Encrypt', icon: Icons.doc },
                 { id: 'vault', title: 'E2E Decrypter', desc: 'Decrypt .aethel encrypted files', icon: Icons.lock }
             ];
             return `
@@ -76,6 +76,7 @@ window.AethelCore = (function() {
                             <button class="tab active" data-tab="sanitize">Sanitize</button>
                             <button class="tab" data-tab="shorten">Shorten</button>
                             <button class="tab" data-tab="reveal">Reveal</button>
+                            <button class="tab" data-tab="media">Download Media</button>
                         </div>
                         <div id="tab-content">
                             <div class="input-group">
@@ -207,7 +208,10 @@ window.AethelCore = (function() {
             const view = Views[route] ? Views[route] : Views.dashboard;
             this.root.innerHTML = view();
             this.attachFileListeners(route);
-            if (route === 'settings') document.getElementById('legal-container').innerHTML = window.AethelLegal.privacyPolicy;
+            if (route === 'settings') {
+                const legalEl = document.getElementById('legal-container');
+                if (legalEl && window.AethelLegal) legalEl.innerHTML = window.AethelLegal.privacyPolicy;
+            }
         },
         
         attachFileListeners(route) {
@@ -257,6 +261,7 @@ window.AethelCore = (function() {
             if (mode === 'sanitize') { input.placeholder = 'Paste messy URL to clean...'; btn.innerHTML = `${Icons.scan} Sanitize`; }
             if (mode === 'shorten') { input.placeholder = 'Paste long URL to shorten...'; btn.innerHTML = `${Icons.link} Shorten`; }
             if (mode === 'reveal') { input.placeholder = 'Paste short URL to reveal...'; btn.innerHTML = `${Icons.scan} Reveal`; }
+            if (mode === 'media') { input.placeholder = 'Paste YouTube, TikTok, or Insta link...'; btn.innerHTML = `${Icons.download} Extract Media`; }
         },
         
         async processUrl(mode) {
@@ -278,9 +283,38 @@ window.AethelCore = (function() {
                     const data = await res.json();
                     if(data.status.url) this.showUrlResult("Final Destination", data.status.url);
                     else throw new Error("Could not reveal URL");
+                } else if (mode === 'media') {
+                    await this.downloadMedia(input);
                 }
             } catch (err) {
                 resultsDiv.innerHTML = `<div class="threat-item">${Icons.scan} Error: ${err.message}</div>`;
+            }
+        },
+
+        async downloadMedia(url) {
+            const resultsDiv = document.getElementById('url-results');
+            try {
+                const res = await fetch('https://api.cobalt.tools/', {
+                    method: 'POST',
+                    headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url: url })
+                });
+                const data = await res.json();
+
+                if (data.status === 'redirect' || data.status === 'stream' || data.status === 'tunnel') {
+                    resultsDiv.innerHTML = `
+                        <div class="scan-results">
+                            <div class="clear-item">${Icons.shield} Media extracted successfully! Trackers & webpage scripts stripped.</div>
+                            <p class="text-muted" style="margin: 1rem 0 0.5rem; font-size: 0.8rem;">CLEAN DIRECT DOWNLOAD LINK:</p>
+                            <div class="mono" style="color: var(--accent); word-break: break-all; background: #000; padding: 0.5rem; border-radius: 6px; margin-bottom: 1rem;">${data.url}</div>
+                            <a href="${data.url}" target="_blank" class="btn" style="text-decoration: none; display: inline-flex;">${Icons.download} Download Clean File</a>
+                        </div>
+                    `;
+                } else {
+                    throw new Error(data.text || "Could not extract media. Ensure it's a valid video/audio link.");
+                }
+            } catch (err) {
+                resultsDiv.innerHTML = `<div class="threat-item">${Icons.scan} Extraction failed: ${err.message}. (API might be rate limited).</div>`;
             }
         },
         
@@ -333,6 +367,8 @@ window.AethelCore = (function() {
                             <option value="png">Convert to PNG</option>
                             <option value="jpeg">Convert to JPEG</option>
                             <option value="webp">Convert to WEBP</option>
+                            <option value="pdf">Convert to PDF Document</option>
+                            <option value="doc">Convert to Word Document (.doc)</option>
                         </select>
                         <button class="btn btn-sm" data-action="convert-image" style="width:100%; margin-bottom:0.5rem;">${Icons.download} Convert & Download</button>
                     `;
@@ -369,6 +405,7 @@ window.AethelCore = (function() {
                     actionContainer.innerHTML = `
                         <select class="input" id="format-select" style="margin-bottom:1rem;">
                             <option value="pdf">Convert to PDF</option>
+                            <option value="doc">Export to Word Document (.doc)</option>
                             <option value="txt">Export as Plain Text (TXT)</option>
                             <option value="clean">Strip Macros & Download Original</option>
                         </select>
@@ -392,6 +429,35 @@ window.AethelCore = (function() {
                 img.src = URL.createObjectURL(this.currentFile);
                 await new Promise(r => img.onload = r);
                 
+                if (format === 'pdf') {
+                    if (!window.jspdf) throw new Error("PDF library not loaded.");
+                    const { jsPDF } = window.jspdf;
+                    const doc = new jsPDF();
+                    const imgWidth = doc.internal.pageSize.getWidth();
+                    const imgHeight = (img.height * imgWidth) / img.width;
+                    doc.addImage(img, 'JPEG', 0, 0, imgWidth, imgHeight);
+                    doc.save(`converted_${this.currentFile.name.split('.')[0]}.pdf`);
+                    this.toast('Image converted to PDF!');
+                    return;
+                }
+
+                if (format === 'doc') {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                    canvas.getContext('2d').drawImage(img, 0, 0);
+                    const dataUrl = canvas.toDataURL('image/png');
+                    
+                    const htmlContent = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'></head><body><img src="${dataUrl}" style="width:100%;"/></body></html>`;
+                    const blob = new Blob(['\ufeff', htmlContent], { type: 'application/msword' });
+                    const a = document.createElement('a');
+                    a.href = URL.createObjectURL(blob);
+                    a.download = `converted_${this.currentFile.name.split('.')[0]}.doc`;
+                    a.click();
+                    this.toast('Image converted to Word Doc!');
+                    return;
+                }
+
                 const canvas = document.createElement('canvas');
                 canvas.width = img.width;
                 canvas.height = img.height;
@@ -449,6 +515,22 @@ window.AethelCore = (function() {
                     this.toast('TXT exported successfully!');
                 } catch (err) {
                     this.toast('Text extraction failed. Is it a .docx?');
+                }
+            }
+            if (format === 'doc') {
+                this.toast('Generating Word Document...');
+                try {
+                    const arrayBuffer = await this.currentFile.arrayBuffer();
+                    const { value: text } = await window.mammoth.extractRawText({ arrayBuffer });
+                    const htmlContent = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'></head><body><p>${text.replace(/\n/g, '</p><p>')}</p></body></html>`;
+                    const blob = new Blob(['\ufeff', htmlContent], { type: 'application/msword' });
+                    const a = document.createElement('a');
+                    a.href = URL.createObjectURL(blob);
+                    a.download = `exported_${this.currentFile.name.split('.')[0]}.doc`;
+                    a.click();
+                    this.toast('Word Document exported!');
+                } catch (err) {
+                    this.toast('Word export failed. Is it a .docx or .txt?');
                 }
             }
         },
@@ -571,6 +653,9 @@ window.AethelCore = (function() {
     };
 
     function init() {
+        if (window.location.hash) {
+            window.location.hash = '';
+        }
         if ('serviceWorker' in navigator) {
             navigator.serviceWorker.register('./service-worker.js').catch(console.error);
         }
