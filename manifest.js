@@ -1,8 +1,8 @@
 {
   "id": "com.aethelcore.secure.pwa",
-  "name": "Aethel Core: Cyber Workspace",
+  "name": "Aethel Core: E2E Cyber Workspace",
   "short_name": "Aethel Core",
-  "description": "Enterprise-Grade Privacy-Preserving Web Workspace & File Sanitizer.",
+  "description": "Telegram-style E2E Encrypted File Processor & Link Sanitizer PWA.",
   "lang": "en-GB",
   "start_url": "/index.html",
   "scope": "/",
@@ -13,26 +13,10 @@
   "categories": ["productivity", "utilities", "security"],
   "icons": [
     {
-      "src": "assets/icon-192.png",
-      "sizes": "192x192",
-      "type": "image/png",
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
       "purpose": "any maskable"
-    },
-    {
-      "src": "assets/icon-512.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "any maskable"
-    }
-  ],
-  "shortcuts": [
-    {
-      "name": "Sanitize Link",
-      "url": "/index.html#links"
-    },
-    {
-      "name": "Clean Image",
-      "url": "/index.html#images"
     }
   ],
   "prefer_related_applications": false
