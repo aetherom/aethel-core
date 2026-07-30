@@ -312,12 +312,16 @@ window.AethelCore = (function() {
                     ['utm_source', 'utm_medium', 'gclid', 'fbclid'].forEach(p => url.searchParams.delete(p));
                     this.showUrlResult("Sanitized URL", url.toString());
                 } else if (mode === 'shorten') {
-                    const res = await fetch(`https://is.gd/create.php?format=simple&url=${encodeURIComponent(input)}`);
+                    // Using a CORS proxy because is.gd blocks browser requests
+                    const proxyUrl = `https://corsproxy.io/?url=${encodeURIComponent(`https://is.gd/create.php?format=simple&url=${encodeURIComponent(input)}`)}`;
+                    const res = await fetch(proxyUrl);
                     const shortUrl = await res.text();
-                    if(shortUrl.startsWith('Error')) throw new Error(shortUrl);
-                    this.showUrlResult("Shortened URL", shortUrl);
+                    if(shortUrl.startsWith('Error') || shortUrl.includes('html')) throw new Error("Could not shorten URL.");
+                    this.showUrlResult("Shortened URL", shortUrl.trim());
                 } else if (mode === 'reveal') {
-                    const res = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(input)}`);
+                    // Using a CORS proxy because allorigins blocks browser requests
+                    const proxyUrl = `https://corsproxy.io/?url=${encodeURIComponent(`https://api.allorigins.win/get?url=${encodeURIComponent(input)}`)}`;
+                    const res = await fetch(proxyUrl);
                     const data = await res.json();
                     if(data.status.url) this.showUrlResult("Final Destination", data.status.url);
                     else throw new Error("Could not reveal URL");
@@ -328,10 +332,11 @@ window.AethelCore = (function() {
                 resultsDiv.innerHTML = `<div class="threat-item">${Icons.scan} Error: ${err.message}</div>`;
             }
         },
+
         async downloadMedia(url) {
             const resultsDiv = document.getElementById('url-results');
             try {
-                resultsDiv.innerHTML = `<div class="progress-bar"><div class="progress-fill" style="width: 50%"></div></div><p class="text-muted">Extracting media via Cobalt API...</p>`;
+                resultsDiv.innerHTML = `<div class="progress-bar"><div class="progress-fill" style="width: 50%"></div></div><p class="text-muted">Extracting media...</p>`;
                 
                 const res = await fetch('https://api.cobalt.tools/', {
                     method: 'POST',
@@ -342,6 +347,40 @@ window.AethelCore = (function() {
                     body: JSON.stringify({ url: url })
                 });
 
+                const data = await res.json().catch(() => null);
+
+                if (!res.ok || !data) {
+                    const errorMsg = data?.error?.code || `API rejected request (Status ${res.status}). The link might be invalid or rate-limited.`;
+                    throw new Error(errorMsg);
+                }
+
+                if (data.status === 'redirect' || data.status === 'stream' || data.status === 'tunnel') {
+                    resultsDiv.innerHTML = `
+                        <div class="scan-results">
+                            <div class="clear-item">${Icons.shield} Media extracted successfully! Trackers & webpage scripts stripped.</div>
+                            <p class="text-muted" style="margin: 1rem 0 0.5rem; font-size: 0.8rem;">CLEAN DIRECT DOWNLOAD LINK:</p>
+                            <div class="mono" style="color: var(--accent); word-break: break-all; background: #000; padding: 0.5rem; border-radius: 6px; margin-bottom: 1rem;">${data.url}</div>
+                            <a href="${data.url}" target="_blank" class="btn" style="text-decoration: none; display: inline-flex;">${Icons.download} Download Clean File</a>
+                        </div>
+                    `;
+                } else if (data.status === 'picker') {
+                    let pickerHtml = data.picker.map(item => 
+                        `<a href="${item.url}" target="_blank" class="btn btn-outline btn-sm" style="margin:0.25rem; text-decoration:none;">${Icons.download} ${item.type || 'File'}</a>`
+                    ).join('');
+                    resultsDiv.innerHTML = `
+                        <div class="scan-results">
+                            <div class="clear-item">${Icons.shield} Multiple media files extracted!</div>
+                            <p class="text-muted" style="margin: 1rem 0 0.5rem; font-size: 0.8rem;">Select a file to download:</p>
+                            <div style="display:flex; flex-wrap:wrap; gap:0.5rem;">${pickerHtml}</div>
+                        </div>
+                    `;
+                } else {
+                    throw new Error(data?.error?.code || "Could not extract media. The link might be unsupported.");
+                }
+            } catch (err) {
+                resultsDiv.innerHTML = `<div class="threat-item">${Icons.scan} Extraction failed: ${err.message}</div>`;
+            }
+        },
                 // Try to parse the JSON response regardless of success or error
                 const data = await res.json().catch(() => null);
 
