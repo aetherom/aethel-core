@@ -144,7 +144,15 @@ window.AethelCore = (function() {
                     <button class="btn btn-outline btn-sm" data-action="navigate" data-payload="dashboard">Back</button>
                 </nav>
                 <div class="container">
-                    <div class="card"><h3>Legal</h3><div id="legal-container" style="margin-top: 1rem;"></div></div>
+                    <div class="card">
+                        <h3>Application Data</h3>
+                        <p class="text-muted" style="margin: 1rem 0;">Clear all cached data and scans. This will unregister the service worker and reload the app.</p>
+                        <button class="btn btn-danger btn-sm" data-action="clear-cache">Clear Cache & Reload</button>
+                    </div>
+                    <div class="card">
+                        <h3>Legal</h3>
+                        <div id="legal-container" style="margin-top: 1rem;">${window.AethelLegal.privacyPolicy}</div>
+                    </div>
                 </div>
             `;
         }
@@ -157,82 +165,90 @@ window.AethelCore = (function() {
         
         init() {
             window.addEventListener('hashchange', () => this.render());
-            document.body.addEventListener('click', (e) => this.handleClick(e));
-            document.body.addEventListener('change', (e) => this.handleChange(e));
-            
-            // Global Drag & Drop Listeners
-            document.body.addEventListener('dragover', (e) => {
-                e.preventDefault();
-                const dz = document.getElementById('drop-zone');
-                if (dz) dz.classList.add('dragover');
-            });
-            document.body.addEventListener('dragleave', () => {
-                const dz = document.getElementById('drop-zone');
-                if (dz) dz.classList.remove('dragover');
-            });
-            document.body.addEventListener('drop', (e) => {
-                e.preventDefault();
-                const dz = document.getElementById('drop-zone');
-                if (dz) dz.classList.remove('dragover');
-                
-                if (e.dataTransfer.files.length > 0) {
-                    const route = window.location.hash.replace('#', '') || 'dashboard';
-                    if (route === 'vault') {
-                        this.encryptedFile = e.dataTransfer.files[0];
-                        document.getElementById('media-results').innerHTML = `<div class="clear-item">${Icons.lock} Encrypted file loaded: ${this.encryptedFile.name}</div>`;
-                    } else {
-                        this.processFile(e.dataTransfer.files[0], route);
-                    }
-                }
-            });
-            
             this.render();
         },
         
-        handleClick(e) {
-            const target = e.target.closest('[data-action]');
-            const tab = e.target.closest('.tab');
-            
-            if (tab) {
-                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-                tab.classList.add('active');
-                this.updateLinkTab(tab.dataset.tab);
-                return;
+        bindEvents(route) {
+            // Bind all clicks via data-action
+            this.root.querySelectorAll('[data-action]').forEach(el => {
+                el.onclick = (e) => {
+                    e.preventDefault();
+                    const action = el.dataset.action;
+                    const payload = el.dataset.payload;
+                    
+                    if (action === 'navigate') { window.location.hash = payload; this.render(); }
+                    else if (action === 'process-url') { this.processUrl(el.dataset.mode); }
+                    else if (action === 'trigger-file') { 
+                        const fileInput = document.getElementById('file-input');
+                        if (fileInput) fileInput.click(); 
+                    }
+                    else if (action === 'download') { this.downloadCurrentFile(); }
+                    else if (action === 'encrypt-file') { this.e2eEncryptFile(); }
+                    else if (action === 'convert-doc') { this.convertDocToPdf(); }
+                    else if (action === 'decrypt-file') { this.e2eDecryptFile(); }
+                    else if (action === 'clear-cache') { this.clearCache(); }
+                };
+            });
+
+            // Bind Tabs
+            this.root.querySelectorAll('.tab').forEach(tab => {
+                tab.onclick = () => {
+                    this.root.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                    tab.classList.add('active');
+                    this.updateLinkTab(tab.dataset.tab);
+                };
+            });
+
+            // Bind File Input Change
+            const fileInput = document.getElementById('file-input');
+            if (fileInput) {
+                fileInput.onchange = (e) => {
+                    if (e.target.files.length > 0) {
+                        if (route === 'vault') {
+                            this.encryptedFile = e.target.files[0];
+                            document.getElementById('media-results').innerHTML = `<div class="clear-item">${Icons.lock} Encrypted file loaded: ${this.encryptedFile.name}</div>`;
+                        } else {
+                            this.processFile(e.target.files[0], route);
+                        }
+                    }
+                };
             }
 
-            if (!target) return;
-            const action = target.dataset.action;
-            const payload = target.dataset.payload;
-
-            if (action === 'navigate') { window.location.hash = payload; this.render(); }
-            else if (action === 'process-url') { this.processUrl(target.dataset.mode); }
-            else if (action === 'trigger-file') { 
-                const fileInput = document.getElementById('file-input');
-                if (fileInput) fileInput.click(); 
-            }
-            else if (action === 'download') { this.downloadCurrentFile(); }
-            else if (action === 'encrypt-file') { this.e2eEncryptFile(); }
-            else if (action === 'convert-doc') { this.convertDocToPdf(); }
-            else if (action === 'decrypt-file') { this.e2eDecryptFile(); }
-        },
-        
-        handleChange(e) {
-            if (e.target.id === 'file-input' && e.target.files.length > 0) {
-                const route = window.location.hash.replace('#', '') || 'dashboard';
-                if (route === 'vault') {
-                    this.encryptedFile = e.target.files[0];
-                    document.getElementById('media-results').innerHTML = `<div class="clear-item">${Icons.lock} Encrypted file loaded: ${this.encryptedFile.name}</div>`;
-                } else {
-                    this.processFile(e.target.files[0], route);
-                }
+            // Bind Drag & Drop
+            const dropZone = document.getElementById('drop-zone');
+            if (dropZone) {
+                dropZone.ondragover = (e) => { e.preventDefault(); dropZone.classList.add('dragover'); };
+                dropZone.ondragleave = () => dropZone.classList.remove('dragover');
+                dropZone.ondrop = (e) => {
+                    e.preventDefault();
+                    dropZone.classList.remove('dragover');
+                    if (e.dataTransfer.files.length > 0) {
+                        if (route === 'vault') {
+                            this.encryptedFile = e.dataTransfer.files[0];
+                            document.getElementById('media-results').innerHTML = `<div class="clear-item">${Icons.lock} Encrypted file loaded: ${this.encryptedFile.name}</div>`;
+                        } else {
+                            this.processFile(e.dataTransfer.files[0], route);
+                        }
+                    }
+                };
             }
         },
         
         render() {
             const route = window.location.hash.replace('#', '') || 'dashboard';
             const view = Views[route] ? Views[route] : Views.dashboard;
-            this.root.innerHTML = view();
-            if (route === 'settings') document.getElementById('legal-container').innerHTML = window.AethelLegal.privacyPolicy;
+            this.root.innerHTML = view() + this.renderDock(route);
+            this.bindEvents(route);
+        },
+        
+        clearCache() {
+            if (caches) {
+                caches.keys().then(keys => keys.forEach(k => caches.delete(k)));
+            }
+            if ('serviceWorker' in navigator) {
+                navigator.serviceWorker.getRegistrations().then(regs => regs.forEach(reg => reg.unregister()));
+            }
+            setTimeout(() => window.location.reload(), 500);
         },
         
         updateLinkTab(mode) {
@@ -325,10 +341,17 @@ window.AethelCore = (function() {
                     actionContainer.innerHTML = `<button class="btn btn-sm" data-action="convert-doc">${Icons.doc} Convert to PDF</button>`;
                 }
 
+                // Re-bind the new action buttons that were just injected
+                this.bindEvents(type);
+
                 actionContainer.innerHTML += `
                     <button class="btn btn-sm btn-outline" data-action="download">${Icons.download} Download Clean</button>
                     <button class="btn btn-sm btn-warning" data-action="encrypt-file">${Icons.lock} E2E Encrypt & Export</button>
                 `;
+                
+                // Re-bind again to catch the download/encrypt buttons
+                this.bindEvents(type);
+
             } catch (err) {
                 resultsDiv.innerHTML = `<div class="threat-item">Error processing file: ${err.message}</div>`;
             }
@@ -422,29 +445,20 @@ window.AethelCore = (function() {
             const t = document.getElementById('toast-container');
             t.innerHTML = `<div class="toast show">${msg}</div>`;
             setTimeout(() => t.innerHTML = '', 3000);
+        },
+        
+        renderDock(route) {
+            const items = [
+                { id: 'dashboard', icon: Icons.home, label: 'Home' },
+                { id: 'links', icon: Icons.link, label: 'Links' },
+                { id: 'images', icon: Icons.image, label: 'Image' },
+                { id: 'audio', icon: Icons.audio, label: 'Audio' },
+                { id: 'video', icon: Icons.video, label: 'Video' },
+                { id: 'docs', icon: Icons.doc, label: 'Docs' },
+                { id: 'vault', icon: Icons.lock, label: 'Vault' }
+            ];
+            return `<div class="dock">${items.map(i => `<button class="dock-item ${route === i.id ? 'active' : ''}" data-action="navigate" data-payload="${i.id}">${i.icon}<span>${i.label}</span></button>`).join('')}</div>`;
         }
-    };
-
-    function renderDock() {
-        const route = window.location.hash.replace('#', '') || 'dashboard';
-        const items = [
-            { id: 'dashboard', icon: Icons.home, label: 'Home' },
-            { id: 'links', icon: Icons.link, label: 'Links' },
-            { id: 'images', icon: Icons.image, label: 'Image' },
-            { id: 'audio', icon: Icons.audio, label: 'Audio' },
-            { id: 'video', icon: Icons.video, label: 'Video' },
-            { id: 'docs', icon: Icons.doc, label: 'Docs' },
-            { id: 'vault', icon: Icons.lock, label: 'Vault' }
-        ];
-        return `<div class="dock">${items.map(i => `<button class="dock-item ${route === i.id ? 'active' : ''}" data-action="navigate" data-payload="${i.id}">${i.icon}<span>${i.label}</span></button>`).join('')}</div>`;
-    }
-
-    const originalRender = UI.render.bind(UI);
-    UI.render = function() {
-        originalRender();
-        const dockEl = document.createElement('div');
-        dockEl.innerHTML = renderDock();
-        document.body.appendChild(dockEl.firstElementChild);
     };
 
     function init() {
