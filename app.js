@@ -293,15 +293,12 @@ window.AethelCore = (function() {
 
         async downloadMedia(url) {
             const resultsDiv = document.getElementById('url-results');
-            
-            // Multi-node fallback list to bypass rate limits
             const instances = [
                 'https://api.cobalt.tools/',
                 'https://cobalt-api.kwiatekmiki.com/',
                 'https://co.eepy.today/',
                 'https://cobalt.synzr.ru/'
             ];
-            
             let success = false;
             let errorMsgs = [];
 
@@ -309,18 +306,13 @@ window.AethelCore = (function() {
                 const instance = instances[i];
                 try {
                     resultsDiv.innerHTML = `<div class="progress-bar"><div class="progress-fill" style="width: ${20 + i * 20}%"></div></div><p class="text-muted">Attempting extraction node ${i + 1}...</p>`;
-                    
                     const res = await fetch(instance, {
                         method: 'POST',
                         headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
                         body: JSON.stringify({ url: url })
                     });
 
-                    if (!res.ok) {
-                        errorMsgs.push(`Node ${i+1} rejected request`);
-                        continue;
-                    }
-
+                    if (!res.ok) { errorMsgs.push(`Node ${i+1} rejected request`); continue; }
                     const data = await res.json();
 
                     if (data.status === 'redirect' || data.status === 'stream' || data.status === 'tunnel') {
@@ -378,7 +370,6 @@ window.AethelCore = (function() {
             try {
                 const prog = document.getElementById('prog');
                 const status = document.getElementById('scan-status');
-                
                 for (let i = 0; i <= 100; i += 25) {
                     prog.style.width = `${i}%`;
                     status.textContent = i < 50 ? 'Checking signature database...' : i < 100 ? 'Stripping metadata...' : 'Scan complete.';
@@ -476,7 +467,6 @@ window.AethelCore = (function() {
                     canvas.height = img.height;
                     canvas.getContext('2d').drawImage(img, 0, 0);
                     const dataUrl = canvas.toDataURL('image/png');
-                    
                     const htmlContent = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'></head><body><img src="${dataUrl}" style="width:100%;"/></body></html>`;
                     const blob = new Blob(['\ufeff', htmlContent], { type: 'application/msword' });
                     const a = document.createElement('a');
@@ -491,7 +481,6 @@ window.AethelCore = (function() {
                 canvas.width = img.width;
                 canvas.height = img.height;
                 canvas.getContext('2d').drawImage(img, 0, 0);
-                
                 const mime = format === 'jpeg' ? 'image/jpeg' : (format === 'webp' ? 'image/webp' : 'image/png');
                 canvas.toBlob((blob) => {
                     const a = document.createElement('a');
@@ -509,7 +498,6 @@ window.AethelCore = (function() {
             const format = document.getElementById('format-select').value;
             const a = document.createElement('a');
             a.href = URL.createObjectURL(this.currentFile);
-            
             if (format === 'original') {
                 a.download = `clean_${this.currentFile.name}`;
             } else {
@@ -522,7 +510,6 @@ window.AethelCore = (function() {
         
         async processDoc() {
             const format = document.getElementById('format-select').value;
-            
             if (format === 'pdf') return this.convertDocToPdf();
             if (format === 'clean') {
                 const a = document.createElement('a');
@@ -568,7 +555,6 @@ window.AethelCore = (function() {
             this.toast('Generating E2E Key & Encrypting...');
             try {
                 if (!window.crypto || !window.crypto.subtle) throw new Error("WebCrypto API requires HTTPS or localhost.");
-                
                 const buffer = await this.currentFile.arrayBuffer();
                 const { key, keyString } = await CryptoEngine.generateKey();
                 const { cipher, iv } = await CryptoEngine.encryptBuffer(key, buffer);
@@ -596,15 +582,12 @@ window.AethelCore = (function() {
         async e2eDecryptFile() {
             const keyString = document.getElementById('decrypt-key').value;
             if (!this.encryptedFile || !keyString) return this.toast('File or Key missing.');
-            
             this.toast('Decrypting...');
             try {
                 if (!window.crypto || !window.crypto.subtle) throw new Error("WebCrypto API requires HTTPS or localhost.");
-                
                 const buffer = await this.encryptedFile.arrayBuffer();
                 const iv = new Uint8Array(buffer.slice(0, 12));
                 const cipher = buffer.slice(12);
-                
                 const key = await CryptoEngine.importKey(keyString);
                 const decryptedBuffer = await CryptoEngine.decryptBuffer(key, cipher, iv);
 
@@ -613,7 +596,6 @@ window.AethelCore = (function() {
                 a.href = URL.createObjectURL(blob);
                 a.download = `decrypted_${this.encryptedFile.name.replace('.aethel.enc', '')}`;
                 a.click();
-                
                 document.getElementById('media-results').innerHTML += `<div class="clear-item" style="margin-top:1rem;">${Icons.lock} Decryption successful! File downloaded.</div>`;
                 this.toast('File decrypted successfully!');
             } catch (err) {
@@ -625,7 +607,6 @@ window.AethelCore = (function() {
             this.toast('Converting document to PDF...');
             try {
                 if (!window.mammoth || !window.jspdf) throw new Error("PDF libraries not loaded.");
-                
                 const arrayBuffer = await this.currentFile.arrayBuffer();
                 const { value: text } = await window.mammoth.extractRawText({ arrayBuffer });
                 const { jsPDF } = window.jspdf;
@@ -675,15 +656,15 @@ window.AethelCore = (function() {
         originalRender();
         const oldDock = document.querySelector('.dock');
         if (oldDock) oldDock.remove(); 
-        
         const dockEl = document.createElement('div');
         dockEl.innerHTML = renderDock();
         document.body.appendChild(dockEl.firstElementChild);
     };
 
     function init() {
+        // Safely clear the hash if it exists on load to prevent blank screens
         if (window.location.hash) {
-            window.location.hash = '';
+            history.replaceState(null, '', window.location.pathname + window.location.search);
         }
         if ('serviceWorker' in navigator) {
             navigator.serviceWorker.register('./service-worker.js').catch(console.error);
