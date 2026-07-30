@@ -159,6 +159,33 @@ window.AethelCore = (function() {
             window.addEventListener('hashchange', () => this.render());
             document.body.addEventListener('click', (e) => this.handleClick(e));
             document.body.addEventListener('change', (e) => this.handleChange(e));
+            
+            // Global Drag & Drop Listeners
+            document.body.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                const dz = document.getElementById('drop-zone');
+                if (dz) dz.classList.add('dragover');
+            });
+            document.body.addEventListener('dragleave', () => {
+                const dz = document.getElementById('drop-zone');
+                if (dz) dz.classList.remove('dragover');
+            });
+            document.body.addEventListener('drop', (e) => {
+                e.preventDefault();
+                const dz = document.getElementById('drop-zone');
+                if (dz) dz.classList.remove('dragover');
+                
+                if (e.dataTransfer.files.length > 0) {
+                    const route = window.location.hash.replace('#', '') || 'dashboard';
+                    if (route === 'vault') {
+                        this.encryptedFile = e.dataTransfer.files[0];
+                        document.getElementById('media-results').innerHTML = `<div class="clear-item">${Icons.lock} Encrypted file loaded: ${this.encryptedFile.name}</div>`;
+                    } else {
+                        this.processFile(e.dataTransfer.files[0], route);
+                    }
+                }
+            });
+            
             this.render();
         },
         
@@ -375,7 +402,7 @@ window.AethelCore = (function() {
         async convertDocToPdf() {
             this.toast('Converting document...');
             try {
-                if (!window.mammoth || !window.jspdf) throw new Error("Conversion libraries not loaded.");
+                if (!window.mammoth || !window.jspdf) throw new Error("Conversion libraries not loaded. Check your internet connection.");
                 
                 const arrayBuffer = await this.currentFile.arrayBuffer();
                 const { value: text } = await window.mammoth.extractRawText({ arrayBuffer });
@@ -387,7 +414,7 @@ window.AethelCore = (function() {
                 doc.save(`converted_${this.currentFile.name.split('.')[0]}.pdf`);
                 this.toast('PDF generated successfully.');
             } catch (err) {
-                this.toast('Error: Only .docx files are supported.');
+                this.toast('Error: Only .docx files are supported. ' + err.message);
             }
         },
         
