@@ -284,14 +284,14 @@ window.AethelCore = (function() {
                     if(data.status.url) this.showUrlResult("Final Destination", data.status.url);
                     else throw new Error("Could not reveal URL");
                 } else if (mode === 'media') {
-                    await this.(input);
+                    await this.downloadMedia(input);
                 }
             } catch (err) {
                 resultsDiv.innerHTML = `<div class="threat-item">${Icons.scan} Error: ${err.message}</div>`;
             }
         },
 
-               async downloadMedia(url) {
+        async downloadMedia(url) {
             const resultsDiv = document.getElementById('url-results');
             
             // Multi-node fallback list to bypass rate limits
