@@ -284,37 +284,66 @@ window.AethelCore = (function() {
                     if(data.status.url) this.showUrlResult("Final Destination", data.status.url);
                     else throw new Error("Could not reveal URL");
                 } else if (mode === 'media') {
-                    await this.downloadMedia(input);
+                    await this.(input);
                 }
             } catch (err) {
                 resultsDiv.innerHTML = `<div class="threat-item">${Icons.scan} Error: ${err.message}</div>`;
             }
         },
 
-        async downloadMedia(url) {
+               async downloadMedia(url) {
             const resultsDiv = document.getElementById('url-results');
-            try {
-                const res = await fetch('https://api.cobalt.tools/', {
-                    method: 'POST',
-                    headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ url: url })
-                });
-                const data = await res.json();
+            
+            // Multi-node fallback list to bypass rate limits
+            const instances = [
+                'https://api.cobalt.tools/',
+                'https://cobalt-api.kwiatekmiki.com/',
+                'https://co.eepy.today/',
+                'https://cobalt.synzr.ru/'
+            ];
+            
+            let success = false;
+            let errorMsgs = [];
 
-                if (data.status === 'redirect' || data.status === 'stream' || data.status === 'tunnel') {
-                    resultsDiv.innerHTML = `
-                        <div class="scan-results">
-                            <div class="clear-item">${Icons.shield} Media extracted successfully! Trackers & webpage scripts stripped.</div>
-                            <p class="text-muted" style="margin: 1rem 0 0.5rem; font-size: 0.8rem;">CLEAN DIRECT DOWNLOAD LINK:</p>
-                            <div class="mono" style="color: var(--accent); word-break: break-all; background: #000; padding: 0.5rem; border-radius: 6px; margin-bottom: 1rem;">${data.url}</div>
-                            <a href="${data.url}" target="_blank" class="btn" style="text-decoration: none; display: inline-flex;">${Icons.download} Download Clean File</a>
-                        </div>
-                    `;
-                } else {
-                    throw new Error(data.text || "Could not extract media. Ensure it's a valid video/audio link.");
+            for (let i = 0; i < instances.length; i++) {
+                const instance = instances[i];
+                try {
+                    resultsDiv.innerHTML = `<div class="progress-bar"><div class="progress-fill" style="width: ${20 + i * 20}%"></div></div><p class="text-muted">Attempting extraction node ${i + 1}...</p>`;
+                    
+                    const res = await fetch(instance, {
+                        method: 'POST',
+                        headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ url: url })
+                    });
+
+                    if (!res.ok) {
+                        errorMsgs.push(`Node ${i+1} rejected request`);
+                        continue;
+                    }
+
+                    const data = await res.json();
+
+                    if (data.status === 'redirect' || data.status === 'stream' || data.status === 'tunnel') {
+                        resultsDiv.innerHTML = `
+                            <div class="scan-results">
+                                <div class="clear-item">${Icons.shield} Media extracted successfully! Trackers & webpage scripts stripped.</div>
+                                <p class="text-muted" style="margin: 1rem 0 0.5rem; font-size: 0.8rem;">CLEAN DIRECT DOWNLOAD LINK:</p>
+                                <div class="mono" style="color: var(--accent); word-break: break-all; background: #000; padding: 0.5rem; border-radius: 6px; margin-bottom: 1rem;">${data.url}</div>
+                                <a href="${data.url}" target="_blank" class="btn" style="text-decoration: none; display: inline-flex;">${Icons.download} Download Clean File</a>
+                            </div>
+                        `;
+                        success = true;
+                        break;
+                    } else {
+                        errorMsgs.push(data?.error?.code || "Extraction failed");
+                    }
+                } catch (err) {
+                    errorMsgs.push(err.message);
                 }
-            } catch (err) {
-                resultsDiv.innerHTML = `<div class="threat-item">${Icons.scan} Extraction failed: ${err.message}. (API might be rate limited).</div>`;
+            }
+
+            if (!success) {
+                resultsDiv.innerHTML = `<div class="threat-item">${Icons.scan} All extraction nodes failed. The public APIs might be rate-limited or the link is unsupported. <br><small>Details: ${errorMsgs.join(', ')}</small></div>`;
             }
         },
         
