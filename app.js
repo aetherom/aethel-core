@@ -662,13 +662,44 @@ window.AethelCore = (function() {
     };
 
     function init() {
-        // Safely clear the hash if it exists on load to prevent blank screens
+        // 1. Safely clear the hash if it exists on load to prevent blank screens on reload
         if (window.location.hash) {
             history.replaceState(null, '', window.location.pathname + window.location.search);
         }
+
+        // 2. Anti-Screenshot / Screen Record Deterrents
+        // Blocks PrintScreen, Ctrl+P, Ctrl+S and clears clipboard
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'PrintScreen' || (e.ctrlKey && (e.key === 'p' || e.key === 's'))) {
+                e.preventDefault();
+                if (navigator.clipboard) navigator.clipboard.writeText('');
+                if (UI.toast) UI.toast('Screenshots and printing are disabled for security.');
+                return false;
+            }
+        });
+
+        // Blurs the app instantly if the user switches tabs, minimizes, or starts a screen share
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'hidden') {
+                document.body.style.filter = 'blur(20px)';
+            } else {
+                document.body.style.filter = 'none';
+            }
+        });
+
+        window.addEventListener('blur', () => {
+            document.body.style.filter = 'blur(20px)';
+        });
+        window.addEventListener('focus', () => {
+            document.body.style.filter = 'none';
+        });
+
+        // 3. Register Service Worker
         if ('serviceWorker' in navigator) {
             navigator.serviceWorker.register('./service-worker.js').catch(console.error);
         }
+        
+        // 4. Init UI
         UI.init();
     }
 
