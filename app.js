@@ -10,10 +10,11 @@ window.AethelCore = (function() {
         doc: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>`,
         home: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg>`,
         lock: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>`,
-        scan: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7V5a2 2 0 0 1 2-2h2"></path><path d="M17 3h2a2 2 0 0 1 2 2v2"></path><path d="M21 17v2a2 2 0 0 1-2 2h-2"></path><path d="M7 21H5a2 2 0 0 1-2-2v-2"></path><line x1="7" y1="12" x2="17" y2="12"></line></svg>`,
+        scan: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7V5a2 2 0 0 1 2-2h2"></path><path d="M17 3h2a2 2 0 0 1 2 2v2"></path><path d="M21 17v2a2 2 0 0 1-2 2h-2"></path><path d="M7 21H5a2 2 0 0 1-2-2v-2"></path><line x1="7" y1="12" x2="17" y2="12"></line></svg>`,
         download: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>`
     };
 
+    // --- E2E Cryptography Engine ---
     const CryptoEngine = {
         async generateKey() {
             const key = await window.crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]);
@@ -151,13 +152,14 @@ window.AethelCore = (function() {
                     </div>
                     <div class="card">
                         <h3>Legal</h3>
-                        <div id="legal-container" style="margin-top: 1rem;">${window.AethelLegal.privacyPolicy}</div>
+                        <div id="legal-container" style="margin-top: 1rem;"></div>
                     </div>
                 </div>
             `;
         }
     };
 
+    // --- UI Controller ---
     const UI = {
         root: document.getElementById('app-root'),
         currentFile: null,
@@ -165,80 +167,82 @@ window.AethelCore = (function() {
         
         init() {
             window.addEventListener('hashchange', () => this.render());
+            // Using the bulletproof global event listener from your first version
+            document.body.addEventListener('click', (e) => this.handleActions(e));
+            document.body.addEventListener('change', (e) => this.handleChange(e));
             this.render();
         },
         
-        bindEvents(route) {
-            // Bind all clicks via data-action
-            this.root.querySelectorAll('[data-action]').forEach(el => {
-                el.onclick = (e) => {
-                    e.preventDefault();
-                    const action = el.dataset.action;
-                    const payload = el.dataset.payload;
-                    
-                    if (action === 'navigate') { window.location.hash = payload; this.render(); }
-                    else if (action === 'process-url') { this.processUrl(el.dataset.mode); }
-                    else if (action === 'trigger-file') { 
-                        const fileInput = document.getElementById('file-input');
-                        if (fileInput) fileInput.click(); 
-                    }
-                    else if (action === 'download') { this.downloadCurrentFile(); }
-                    else if (action === 'encrypt-file') { this.e2eEncryptFile(); }
-                    else if (action === 'convert-doc') { this.convertDocToPdf(); }
-                    else if (action === 'decrypt-file') { this.e2eDecryptFile(); }
-                    else if (action === 'clear-cache') { this.clearCache(); }
-                };
-            });
-
-            // Bind Tabs
-            this.root.querySelectorAll('.tab').forEach(tab => {
-                tab.onclick = () => {
-                    this.root.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-                    tab.classList.add('active');
-                    this.updateLinkTab(tab.dataset.tab);
-                };
-            });
-
-            // Bind File Input Change
-            const fileInput = document.getElementById('file-input');
-            if (fileInput) {
-                fileInput.onchange = (e) => {
-                    if (e.target.files.length > 0) {
-                        if (route === 'vault') {
-                            this.encryptedFile = e.target.files[0];
-                            document.getElementById('media-results').innerHTML = `<div class="clear-item">${Icons.lock} Encrypted file loaded: ${this.encryptedFile.name}</div>`;
-                        } else {
-                            this.processFile(e.target.files[0], route);
-                        }
-                    }
-                };
+        handleActions(e) {
+            const target = e.target.closest('[data-action]');
+            const tab = e.target.closest('.tab');
+            
+            if (tab) {
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                this.updateLinkTab(tab.dataset.tab);
+                return;
             }
 
-            // Bind Drag & Drop
-            const dropZone = document.getElementById('drop-zone');
-            if (dropZone) {
-                dropZone.ondragover = (e) => { e.preventDefault(); dropZone.classList.add('dragover'); };
-                dropZone.ondragleave = () => dropZone.classList.remove('dragover');
-                dropZone.ondrop = (e) => {
-                    e.preventDefault();
-                    dropZone.classList.remove('dragover');
-                    if (e.dataTransfer.files.length > 0) {
-                        if (route === 'vault') {
-                            this.encryptedFile = e.dataTransfer.files[0];
-                            document.getElementById('media-results').innerHTML = `<div class="clear-item">${Icons.lock} Encrypted file loaded: ${this.encryptedFile.name}</div>`;
-                        } else {
-                            this.processFile(e.dataTransfer.files[0], route);
-                        }
-                    }
-                };
+            if (!target) return;
+            const action = target.dataset.action;
+            const payload = target.dataset.payload;
+
+            if (action === 'navigate') { window.location.hash = payload; this.render(); }
+            else if (action === 'process-url') { this.processUrl(target.dataset.mode); }
+            else if (action === 'trigger-file') { 
+                const fileInput = document.getElementById('file-input');
+                if (fileInput) fileInput.click(); 
+            }
+            else if (action === 'download') { this.downloadCurrentFile(); }
+            else if (action === 'encrypt-file') { this.e2eEncryptFile(); }
+            else if (action === 'convert-doc') { this.convertDocToPdf(); }
+            else if (action === 'decrypt-file') { this.e2eDecryptFile(); }
+            else if (action === 'clear-cache') { this.clearCache(); }
+        },
+        
+        handleChange(e) {
+            if (e.target.id === 'file-input' && e.target.files.length > 0) {
+                const route = window.location.hash.replace('#', '') || 'dashboard';
+                if (route === 'vault') {
+                    this.encryptedFile = e.target.files[0];
+                    document.getElementById('media-results').innerHTML = `<div class="clear-item">${Icons.lock} Encrypted file loaded: ${this.encryptedFile.name}</div>`;
+                } else {
+                    this.processFile(e.target.files[0], route);
+                }
             }
         },
         
         render() {
             const route = window.location.hash.replace('#', '') || 'dashboard';
             const view = Views[route] ? Views[route] : Views.dashboard;
-            this.root.innerHTML = view() + this.renderDock(route);
-            this.bindEvents(route);
+            this.root.innerHTML = view();
+            this.attachFileListeners(route);
+            if (route === 'settings') {
+                document.getElementById('legal-container').innerHTML = window.AethelLegal.privacyPolicy;
+            }
+        },
+        
+        attachFileListeners(route) {
+            const dropZone = document.getElementById('drop-zone');
+            const fileInput = document.getElementById('file-input');
+            if (!dropZone || !fileInput) return;
+
+            // Global drag and drop bound directly to the element when it renders
+            dropZone.ondragover = (e) => { e.preventDefault(); dropZone.classList.add('dragover'); };
+            dropZone.ondragleave = () => dropZone.classList.remove('dragover');
+            dropZone.ondrop = (e) => {
+                e.preventDefault();
+                dropZone.classList.remove('dragover');
+                if (e.dataTransfer.files.length > 0) {
+                    if (route === 'vault') {
+                        this.encryptedFile = e.dataTransfer.files[0];
+                        document.getElementById('media-results').innerHTML = `<div class="clear-item">${Icons.lock} Encrypted file loaded: ${this.encryptedFile.name}</div>`;
+                    } else {
+                        this.processFile(e.dataTransfer.files[0], route);
+                    }
+                }
+            };
         },
         
         clearCache() {
@@ -306,8 +310,9 @@ window.AethelCore = (function() {
             resultsDiv.innerHTML = `
                 <div class="scan-results">
                     <h4>${file.name}</h4>
+                    <p class="text-muted">${(file.size / 1024).toFixed(2)} KB</p>
                     <div class="progress-bar"><div class="progress-fill" id="prog" style="width: 0%"></div></div>
-                    <p id="scan-status" class="text-muted mono">Scanning...</p>
+                    <p id="scan-status" class="text-muted mono">Initializing scan...</p>
                     <div id="media-container" style="margin-top:1rem;"></div>
                     <div id="action-container" style="margin-top:1rem; display:flex; flex-wrap:wrap; gap:0.5rem;"></div>
                 </div>
@@ -315,8 +320,14 @@ window.AethelCore = (function() {
 
             try {
                 const prog = document.getElementById('prog');
-                for (let i = 0; i <= 100; i += 25) { prog.style.width = `${i}%`; await new Promise(r => setTimeout(r, 150)); }
-                document.getElementById('scan-status').innerHTML = `<span style="color:var(--accent)">✓ Clean. No metadata or malware detected.</span>`;
+                const status = document.getElementById('scan-status');
+                
+                for (let i = 0; i <= 100; i += 25) {
+                    prog.style.width = `${i}%`;
+                    status.textContent = i < 50 ? 'Checking signature database...' : i < 100 ? 'Stripping metadata...' : 'Scan complete.';
+                    await new Promise(r => setTimeout(r, 150));
+                }
+                status.innerHTML = `<span style="color:var(--accent)">✓ Clean. No metadata or malware detected.</span>`;
 
                 const mediaContainer = document.getElementById('media-container');
                 const actionContainer = document.getElementById('action-container');
@@ -338,20 +349,13 @@ window.AethelCore = (function() {
                             <button class="btn btn-outline btn-sm" onclick="document.getElementById('media-player').playbackRate=2">2x</button>
                         </div>`;
                 } else if (type === 'docs') {
-                    actionContainer.innerHTML = `<button class="btn btn-sm" data-action="convert-doc">${Icons.doc} Convert to PDF</button>`;
+                    actionContainer.innerHTML += `<button class="btn btn-sm" data-action="convert-doc">${Icons.doc} Convert to PDF</button>`;
                 }
-
-                // Re-bind the new action buttons that were just injected
-                this.bindEvents(type);
 
                 actionContainer.innerHTML += `
                     <button class="btn btn-sm btn-outline" data-action="download">${Icons.download} Download Clean</button>
                     <button class="btn btn-sm btn-warning" data-action="encrypt-file">${Icons.lock} E2E Encrypt & Export</button>
                 `;
-                
-                // Re-bind again to catch the download/encrypt buttons
-                this.bindEvents(type);
-
             } catch (err) {
                 resultsDiv.innerHTML = `<div class="threat-item">Error processing file: ${err.message}</div>`;
             }
@@ -368,7 +372,7 @@ window.AethelCore = (function() {
         async e2eEncryptFile() {
             this.toast('Generating E2E Key & Encrypting...');
             try {
-                if (!window.crypto || !window.crypto.subtle) throw new Error("WebCrypto API not available. Are you running on HTTPS/Localhost?");
+                if (!window.crypto || !window.crypto.subtle) throw new Error("WebCrypto API requires HTTPS or localhost.");
                 
                 const buffer = await this.currentFile.arrayBuffer();
                 const { key, keyString } = await CryptoEngine.generateKey();
@@ -400,7 +404,7 @@ window.AethelCore = (function() {
             
             this.toast('Decrypting...');
             try {
-                if (!window.crypto || !window.crypto.subtle) throw new Error("WebCrypto API not available. Are you running on HTTPS/Localhost?");
+                if (!window.crypto || !window.crypto.subtle) throw new Error("WebCrypto API requires HTTPS or localhost.");
                 
                 const buffer = await this.encryptedFile.arrayBuffer();
                 const iv = new Uint8Array(buffer.slice(0, 12));
@@ -425,7 +429,7 @@ window.AethelCore = (function() {
         async convertDocToPdf() {
             this.toast('Converting document...');
             try {
-                if (!window.mammoth || !window.jspdf) throw new Error("Conversion libraries not loaded. Check your internet connection.");
+                if (!window.mammoth || !window.jspdf) throw new Error("PDF libraries not loaded.");
                 
                 const arrayBuffer = await this.currentFile.arrayBuffer();
                 const { value: text } = await window.mammoth.extractRawText({ arrayBuffer });
@@ -437,7 +441,7 @@ window.AethelCore = (function() {
                 doc.save(`converted_${this.currentFile.name.split('.')[0]}.pdf`);
                 this.toast('PDF generated successfully.');
             } catch (err) {
-                this.toast('Error: Only .docx files are supported. ' + err.message);
+                this.toast('Error: Only .docx files are supported.');
             }
         },
         
@@ -445,24 +449,49 @@ window.AethelCore = (function() {
             const t = document.getElementById('toast-container');
             t.innerHTML = `<div class="toast show">${msg}</div>`;
             setTimeout(() => t.innerHTML = '', 3000);
-        },
-        
-        renderDock(route) {
-            const items = [
-                { id: 'dashboard', icon: Icons.home, label: 'Home' },
-                { id: 'links', icon: Icons.link, label: 'Links' },
-                { id: 'images', icon: Icons.image, label: 'Image' },
-                { id: 'audio', icon: Icons.audio, label: 'Audio' },
-                { id: 'video', icon: Icons.video, label: 'Video' },
-                { id: 'docs', icon: Icons.doc, label: 'Docs' },
-                { id: 'vault', icon: Icons.lock, label: 'Vault' }
-            ];
-            return `<div class="dock">${items.map(i => `<button class="dock-item ${route === i.id ? 'active' : ''}" data-action="navigate" data-payload="${i.id}">${i.icon}<span>${i.label}</span></button>`).join('')}</div>`;
         }
     };
 
+    // --- Dock Layout ---
+    function renderDock() {
+        const route = window.location.hash.replace('#', '') || 'dashboard';
+        const items = [
+            { id: 'dashboard', icon: Icons.home, label: 'Home' },
+            { id: 'links', icon: Icons.link, label: 'Links' },
+            { id: 'images', icon: Icons.image, label: 'Image' },
+            { id: 'audio', icon: Icons.audio, label: 'Audio' },
+            { id: 'video', icon: Icons.video, label: 'Video' },
+            { id: 'docs', icon: Icons.doc, label: 'Docs' },
+            { id: 'vault', icon: Icons.lock, label: 'Vault' }
+        ];
+        return `
+            <div class="dock">
+                ${items.map(i => `
+                    <button class="dock-item ${route === i.id ? 'active' : ''}" data-action="navigate" data-payload="${i.id}">
+                        ${i.icon}
+                        <span>${i.label}</span>
+                    </button>
+                `).join('')}
+            </div>
+        `;
+    }
+
+    // Intercept render to add dock (Fixed bug where multiple docks were appended)
+    const originalRender = UI.render.bind(UI);
+    UI.render = function() {
+        originalRender();
+        const oldDock = document.querySelector('.dock');
+        if (oldDock) oldDock.remove(); // Prevent duplicate docks
+        
+        const dockEl = document.createElement('div');
+        dockEl.innerHTML = renderDock();
+        document.body.appendChild(dockEl.firstElementChild);
+    };
+
     function init() {
-        if ('serviceWorker' in navigator) navigator.serviceWorker.register('./service-worker.js').catch(console.error);
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('./service-worker.js').catch(console.error);
+        }
         UI.init();
     }
 
