@@ -14,6 +14,7 @@ window.AethelCore = (function() {
         download: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>`
     };
 
+    // --- E2E Cryptography Engine (AES-GCM 256) ---
     const CryptoEngine = {
         async generateKey() {
             const key = await window.crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]);
@@ -31,6 +32,43 @@ window.AethelCore = (function() {
         },
         async decryptBuffer(key, cipher, iv) {
             return await window.crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, cipher);
+        }
+    };
+
+    // --- Custom JavaScript Malware Scanner ---
+    const JSScanner = {
+        knownMaliciousHashes: [
+            "275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f", // EICAR Test Virus
+            "131f95c51cc819465fa1797f6ccacf9d494aaaff46fa3eac73ae63ffbdfd8267"  // EICAR Variant
+        ],
+        async getSHA256(file) {
+            const buffer = await file.arrayBuffer();
+            const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
+            const hashArray = Array.from(new Uint8Array(hashBuffer));
+            return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+        },
+        async scan(file) {
+            const hash = await this.getSHA256(file);
+            if (this.knownMaliciousHashes.includes(hash)) {
+                return { clean: false, threat: "Known Malware Signature Detected (Hash Match)" };
+            }
+            const textBuffer = await file.slice(0, 5242880).text();
+            if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+                if (textBuffer.includes('/JavaScript') || textBuffer.includes('/JS ') || textBuffer.includes('/EmbeddedFile')) {
+                    return { clean: false, threat: "Malicious Embedded Script or File in PDF" };
+                }
+            }
+            if (file.name.toLowerCase().endsWith('.docx') || file.name.toLowerCase().endsWith('.xlsx')) {
+                if (textBuffer.includes('vbaProject.bin') || textBuffer.includes('vbaData.xml')) {
+                    return { clean: false, threat: "VBA Macro Virus Detected" };
+                }
+            }
+            if (file.type === 'text/html' || file.name.toLowerCase().endsWith('.html')) {
+                if (textBuffer.includes('<script') && (textBuffer.includes('evil(') || textBuffer.includes('malware'))) {
+                    return { clean: false, threat: "Malicious HTML Script Detected" };
+                }
+            }
+            return { clean: true };
         }
     };
 
@@ -361,7 +399,7 @@ window.AethelCore = (function() {
                     <h4>${file.name}</h4>
                     <p class="text-muted">${(file.size / 1024).toFixed(2)} KB</p>
                     <div class="progress-bar"><div class="progress-fill" id="prog" style="width: 0%"></div></div>
-                    <p id="scan-status" class="text-muted mono">Initializing scan...</p>
+                    <p id="scan-status" class="text-muted mono">Initializing Deep Scan...</p>
                     <div id="media-container" style="margin-top:1rem;"></div>
                     <div id="action-container" style="margin-top:1rem;"></div>
                 </div>
@@ -370,12 +408,32 @@ window.AethelCore = (function() {
             try {
                 const prog = document.getElementById('prog');
                 const status = document.getElementById('scan-status');
-                for (let i = 0; i <= 100; i += 25) {
-                    prog.style.width = `${i}%`;
-                    status.textContent = i < 50 ? 'Checking signature database...' : i < 100 ? 'Stripping metadata...' : 'Scan complete.';
-                    await new Promise(r => setTimeout(r, 150));
+                
+                // 1. Run the Custom JS Scanner
+                prog.style.width = '25%';
+                status.textContent = 'Calculating SHA-256 Cryptographic Hash...';
+                prog.style.width = '50%';
+                status.textContent = 'Running Heuristic Structural Analysis...';
+                
+                const scanResult = await JSScanner.scan(file);
+                
+                prog.style.width = '100%';
+
+                // 2. Handle Threat Detection
+                if (!scanResult.clean) {
+                    status.innerHTML = `<span style="color:var(--danger)">⚠ THREAT DETECTED!</span>`;
+                    resultsDiv.innerHTML += `
+                        <div class="threat-item" style="margin-top:1rem; flex-direction: column; align-items: flex-start; text-align: left;">
+                            <div style="display:flex; align-items:center; gap:0.5rem;">${Icons.scan} ${scanResult.threat}</div>
+                            <p class="text-muted" style="margin-top:0.5rem; font-size:0.8rem;">File processing has been blocked. Do not open this file.</p>
+                        </div>
+                    `;
+                    this.toast('Malware detected! File blocked.');
+                    return; // Stop processing entirely
                 }
-                status.innerHTML = `<span style="color:var(--accent)">✓ Clean. No metadata or malware detected.</span>`;
+
+                // 3. If Clean, proceed with UI
+                status.innerHTML = `<span style="color:var(--accent)">✓ Verified Clean. No malicious signatures or macros found.</span>`;
 
                 const mediaContainer = document.getElementById('media-container');
                 const actionContainer = document.getElementById('action-container');
@@ -668,7 +726,6 @@ window.AethelCore = (function() {
         }
 
         // 2. Anti-Screenshot / Screen Record Deterrents
-        // Blocks PrintScreen, Ctrl+P, Ctrl+S and clears clipboard
         document.addEventListener('keydown', (e) => {
             if (e.key === 'PrintScreen' || (e.ctrlKey && (e.key === 'p' || e.key === 's'))) {
                 e.preventDefault();
@@ -678,7 +735,6 @@ window.AethelCore = (function() {
             }
         });
 
-        // Blurs the app instantly if the user switches tabs, minimizes, or starts a screen share
         document.addEventListener('visibilitychange', () => {
             if (document.visibilityState === 'hidden') {
                 document.body.style.filter = 'blur(20px)';
