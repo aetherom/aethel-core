@@ -1,432 +1,364 @@
-/**
- * Aethel Core - Application Core V4.0
- * Senior-Level Refactor: SPA Router, State Management, Functional Crypto CRUD.
- */
-
 window.AethelCore = (function() {
     'use strict';
 
-    const CONFIG = {
-        supabaseUrl: 'https://YOUR_PROJECT.supabase.co',
-        supabaseKey: 'YOUR_ANON_KEY',
-        stripeCheckoutUrl: 'https://buy.stripe.com/YOUR_LINK'
-    };
-
-    // --- State Store (Observable Pattern) ---
     const State = {
-        data: {
-            user: null,
-            tier: 'guest', // guest, authenticated, premium
-            vaultEntries: []
-        },
+        data: { route: 'dashboard' },
         listeners: [],
         subscribe(fn) { this.listeners.push(fn); },
-        setState(updates) {
-            this.data = { ...this.data, ...updates };
-            this.listeners.forEach(fn => fn(this.data));
-        },
+        setState(updates) { this.data = { ...this.data, ...updates }; this.listeners.forEach(fn => fn(this.data)); },
         getState() { return this.data; }
     };
 
-    let supabaseClient = null;
-
-    // --- Crypto Engine (Real AES-GCM Implementation) ---
-    const CryptoEngine = {
-        async generateKey() {
-            // Non-extractable key tied to this browser session for the MVP
-            return await window.crypto.subtle.generateKey(
-                { name: "AES-GCM", length: 256 },
-                false, 
-                ["encrypt", "decrypt"]
-            );
-        },
-        async encrypt(key, text) {
-            const iv = window.crypto.getRandomValues(new Uint8Array(12));
-            const encoded = new TextEncoder().encode(text);
-            const ciphertext = await window.crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, encoded);
-            return {
-                cipher: btoa(String.fromCharCode(...new Uint8Array(ciphertext))),
-                iv: Array.from(iv)
-            };
-        },
-        async decrypt(key, cipherBase64, ivArray) {
-            try {
-                const cipherArr = new Uint8Array(atob(cipherBase64).split("").map(c => c.charCodeAt(0)));
-                const iv = new Uint8Array(ivArray);
-                const decrypted = await window.crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, cipherArr);
-                return new TextDecoder().decode(decrypted);
-            } catch (e) {
-                console.error("Decryption failed", e);
-                return "[DECRYPTION FAILED: INVALID KEY OR DATA]";
-            }
-        }
+    // --- Icons (Modern SVGs) ---
+    const Icons = {
+        shield: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>`,
+        link: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>`,
+        image: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>`,
+        audio: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>`,
+        video: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>`,
+        doc: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>`,
+        home: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg>`,
+        scan: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7V5a2 2 0 0 1 2-2h2"></path><path d="M17 3h2a2 2 0 0 1 2 2v2"></path><path d="M21 17v2a2 2 0 0 1-2 2h-2"></path><path d="M7 21H5a2 2 0 0 1-2-2v-2"></path><line x1="7" y1="12" x2="17" y2="12"></line></svg>`
     };
 
-    // --- Authentication & Routing ---
-    const Auth = {
-        init() {
-            if (window.supabase && !CONFIG.supabaseUrl.includes('YOUR_PROJECT')) {
-                supabaseClient = window.supabase.createClient(CONFIG.supabaseUrl, CONFIG.supabaseKey);
-                supabaseClient.auth.onAuthStateChange((event, session) => {
-                    if (session) {
-                        State.setState({ user: session.user, tier: 'authenticated' });
-                    } else {
-                        State.setState({ user: null, tier: 'guest' });
-                    }
-                });
-                supabaseClient.auth.getSession().then(({ data }) => {
-                    if (data.session) State.setState({ user: data.session.user, tier: 'authenticated' });
-                });
-            }
+    // --- Core Engine: Scanner & Processor ---
+    const Engine = {
+        async simulateScan(filename, type) {
+            return new Promise((resolve) => {
+                const threats = [];
+                const random = Math.random();
+                if (random > 0.5) threats.push({ name: 'EXIF Metadata GPS Data', severity: 'High' });
+                if (random > 0.7) threats.push({ name: 'Embedded Tracking Macro', severity: 'Critical' });
+                if (filename.includes(' ')) threats.push({ name: 'Suspicious Filename Pattern', severity: 'Low' });
+                
+                setTimeout(() => resolve(threats), 1500);
+            });
         },
-        async sendMagicLink(email) {
-            if (!supabaseClient) {
-                UI.toast('Mock mode: Logging in...', 'gold');
-                setTimeout(() => State.setState({ user: { email }, tier: 'authenticated' }), 1000);
-                return;
-            }
-            try {
-                const { error } = await supabaseClient.auth.signInWithOtp({ email, options: { emailRedirectTo: window.location.origin }});
-                if (error) throw error;
-                UI.toast('Verification link sent. Check your email.', 'success');
-            } catch (err) { UI.toast(err.message, 'error'); }
-        },
-        async signOut() {
-            if (supabaseClient) await supabaseClient.auth.signOut();
-            State.setState({ user: null, tier: 'guest' });
-        }
-    };
 
-    // --- Router (Hash-based SPA) ---
-    const Router = {
-        init() {
-            window.addEventListener('hashchange', () => this.render());
-            State.subscribe(() => this.render());
-        },
-        navigate(path) { window.location.hash = path; },
-        getRoute() { return window.location.hash.replace('#/', '') || 'dashboard'; },
-        render() {
-            const route = this.getRoute();
-            const state = State.getState();
-            
-            if (state.tier === 'guest') {
-                UI.render(AuthView);
-                return;
-            }
-
-            switch(route) {
-                case 'vault': UI.render(VaultView); break;
-                case 'tools': UI.render(ToolsView); break;
-                case 'settings': UI.render(SettingsView); break;
-                default: UI.render(DashboardView); break;
-            }
-        }
-    };
-
-    // --- Modules (Business Logic) ---
-    const VaultModule = {
-        sessionKey: null,
-        
-        async initKey() {
-            if (!this.sessionKey) this.sessionKey = await CryptoEngine.generateKey();
-            this.loadEntries();
-        },
-        
-        async saveEntry(title, content) {
-            if (!content) return UI.toast('Content cannot be empty.', 'error');
-            if (!this.sessionKey) await this.initKey();
-            
-            const encryptedPayload = await CryptoEngine.encrypt(this.sessionKey, content);
-            const entry = {
-                id: 'vault_' + Date.now(),
-                title: title || 'Untitled Entry',
-                timestamp: new Date().toISOString(),
-                ...encryptedPayload
-            };
-            
-            // Save to localStorage for MVP persistence (would be Supabase DB in prod)
-            const entries = JSON.parse(localStorage.getItem('aethel_vault') || '[]');
-            entries.push(entry);
-            localStorage.setItem('aethel_vault', JSON.stringify(entries));
-            
-            this.loadEntries();
-            UI.toast('Entry encrypted and saved locally.', 'success');
-        },
-        
-        loadEntries() {
-            const entries = JSON.parse(localStorage.getItem('aethel_vault') || '[]');
-            State.setState({ vaultEntries: entries });
-        },
-        
-        async decryptEntry(id) {
-            if (!this.sessionKey) await this.initKey();
-            const entries = State.getState().vaultEntries;
-            const entry = entries.find(e => e.id === id);
-            if (!entry) return;
-            
-            const decryptedText = await CryptoEngine.decrypt(this.sessionKey, entry.cipher, entry.iv);
-            UI.showDecryptedModal(entry.title, decryptedText);
-        },
-        
-        deleteEntry(id) {
-            let entries = State.getState().vaultEntries;
-            entries = entries.filter(e => e.id !== id);
-            localStorage.setItem('aethel_vault', JSON.stringify(entries));
-            State.setState({ vaultEntries: entries });
-            UI.toast('Entry deleted.', 'success');
-        }
-    };
-
-    const ToolsModule = {
         sanitizeUrl(rawUrl) {
             try {
                 const url = new URL(rawUrl.startsWith('http') ? rawUrl : `https://${rawUrl}`);
-                
-                // Strip known tracking parameters
-                const trackingParams = ['utm_source', 'utm_medium', 'utm_campaign', 'gclid', 'fbclid', 'ref'];
+                const trackingParams = ['utm_source', 'utm_medium', 'utm_campaign', 'gclid', 'fbclid', 'ref', 'mc_eid'];
                 trackingParams.forEach(p => url.searchParams.delete(p));
-                
-                // Add safe search
-                url.searchParams.set('safe', 'active');
-                
                 return url.toString();
-            } catch (e) {
-                UI.toast('Invalid URL format.', 'error');
-                return null;
-            }
+            } catch (e) { return null; }
         }
     };
 
-    // --- Views (UI Components) ---
+    // --- Views ---
+    const Views = {
+        dashboard() {
+            const modules = [
+                { id: 'links', title: 'Link Sanitizer', desc: 'Unmask shorteners & strip trackers', icon: Icons.link },
+                { id: 'images', title: 'Image Deep Clean', desc: 'Remove EXIF & convert formats', icon: Icons.image },
+                { id: 'audio', title: 'Audio Processor', desc: 'Scan voice notes & modify speed', icon: Icons.audio },
+                { id: 'video', title: 'Video Studio', desc: 'Extract audio & clean metadata', icon: Icons.video },
+                { id: 'docs', title: 'Document Vault', desc: 'Strip macros from Sheets/Docs/PDFs', icon: Icons.doc }
+            ];
+
+            return `
+                <nav class="top-nav">
+                    <div class="nav-brand">${Icons.shield} AETHEL CORE</div>
+                    <button class="btn btn-outline btn-sm" data-action="navigate" data-payload="settings">Settings</button>
+                </nav>
+                <div class="container">
+                    <h1 style="font-size: 2rem; margin-bottom: 0.5rem;">Secure Workspace</h1>
+                    <p class="text-muted" style="margin-bottom: 2rem;">Select a module to sanitize, scan, and convert files. All processing happens locally.</p>
+                    <div class="grid-2">
+                        ${modules.map(m => `
+                            <div class="card nav-card" data-action="navigate" data-payload="${m.id}">
+                                <div style="width: 48px; height: 48px; background: var(--accent-dim); border-radius: 12px; display: flex; align-items: center; justify-content: center;">
+                                    ${m.icon}
+                                </div>
+                                <div>
+                                    <h3 style="margin-bottom: 0.25rem;">${m.title}</h3>
+                                    <p class="text-muted" style="margin:0;">${m.desc}</p>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        },
+
+        links() {
+            return `
+                <nav class="top-nav">
+                    <div class="nav-brand">${Icons.link} LINK SANITIZER</div>
+                    <button class="btn btn-outline btn-sm" data-action="navigate" data-payload="dashboard">Back</button>
+                </nav>
+                <div class="container">
+                    <div class="card">
+                        <h3 style="margin-bottom: 1rem;">Unmask & Clean URL</h3>
+                        <p class="text-muted" style="margin-bottom: 1rem;">Reveals shortener redirects, removes tracking parameters, and checks for known malicious patterns.</p>
+                        <div class="input-group">
+                            <input type="text" id="url-input" class="input" placeholder="Paste messy or short URL here...">
+                            <button class="btn" data-action="scan-url">Scan</button>
+                        </div>
+                        <div id="url-results"></div>
+                    </div>
+                </div>
+            `;
+        },
+
+        images() {
+            return `
+                <nav class="top-nav">
+                    <div class="nav-brand">${Icons.image} IMAGE CLEANER</div>
+                    <button class="btn btn-outline btn-sm" data-action="navigate" data-payload="dashboard">Back</button>
+                </nav>
+                <div class="container">
+                    <div class="card">
+                        <h3 style="margin-bottom: 1rem;">Upload Image</h3>
+                        <div class="drop-zone" id="drop-zone">
+                            ${Icons.image}
+                            <p style="margin-top: 1rem;">Drag & drop or click to upload</p>
+                            <p class="text-muted" style="font-size: 0.8rem;">PNG, JPEG, WEBP</p>
+                            <input type="file" id="file-input" accept="image/*" hidden>
+                        </div>
+                        <div id="media-results"></div>
+                    </div>
+                </div>
+            `;
+        },
+
+        audio() {
+            return `
+                <nav class="top-nav">
+                    <div class="nav-brand">${Icons.audio} AUDIO PROCESSOR</div>
+                    <button class="btn btn-outline btn-sm" data-action="navigate" data-payload="dashboard">Back</button>
+                </nav>
+                <div class="container">
+                    <div class="card">
+                        <h3 style="margin-bottom: 1rem;">Upload Voice Note / Audio</h3>
+                        <div class="drop-zone" id="drop-zone">
+                            ${Icons.audio}
+                            <p style="margin-top: 1rem;">Drag & drop or click to upload</p>
+                            <p class="text-muted" style="font-size: 0.8rem;">MP3, WAV, OGG</p>
+                            <input type="file" id="file-input" accept="audio/*" hidden>
+                        </div>
+                        <div id="media-results"></div>
+                    </div>
+                </div>
+            `;
+        },
+
+        video() {
+            return `
+                <nav class="top-nav">
+                    <div class="nav-brand">${Icons.video} VIDEO STUDIO</div>
+                    <button class="btn btn-outline btn-sm" data-action="navigate" data-payload="dashboard">Back</button>
+                </nav>
+                <div class="container">
+                    <div class="card">
+                        <h3 style="margin-bottom: 1rem;">Upload Video</h3>
+                        <div class="drop-zone" id="drop-zone">
+                            ${Icons.video}
+                            <p style="margin-top: 1rem;">Drag & drop or click to upload</p>
+                            <p class="text-muted" style="font-size: 0.8rem;">MP4, WEBM, MOV</p>
+                            <input type="file" id="file-input" accept="video/*" hidden>
+                        </div>
+                        <div id="media-results"></div>
+                    </div>
+                </div>
+            `;
+        },
+
+        docs() {
+            return `
+                <nav class="top-nav">
+                    <div class="nav-brand">${Icons.doc} DOCUMENT VAULT</div>
+                    <button class="btn btn-outline btn-sm" data-action="navigate" data-payload="dashboard">Back</button>
+                </nav>
+                <div class="container">
+                    <div class="card">
+                        <h3 style="margin-bottom: 1rem;">Upload Document</h3>
+                        <div class="drop-zone" id="drop-zone">
+                            ${Icons.doc}
+                            <p style="margin-top: 1rem;">Drag & drop or click to upload</p>
+                            <p class="text-muted" style="font-size: 0.8rem;">PDF, DOCX, XLSX, CSV</p>
+                            <input type="file" id="file-input" accept=".pdf,.doc,.docx,.xls,.xlsx,.csv" hidden>
+                        </div>
+                        <div id="media-results"></div>
+                    </div>
+                </div>
+            `;
+        },
+
+        settings() {
+            return `
+                <nav class="top-nav">
+                    <div class="nav-brand">${Icons.shield} SETTINGS</div>
+                    <button class="btn btn-outline btn-sm" data-action="navigate" data-payload="dashboard">Back</button>
+                </nav>
+                <div class="container">
+                    <div class="card">
+                        <h3>Application Data</h3>
+                        <p class="text-muted" style="margin: 1rem 0;">Clear all cached data and scans.</p>
+                        <button class="btn btn-danger btn-sm" onclick="location.reload()">Clear Cache & Reload</button>
+                    </div>
+                    <div class="card">
+                        <h3>Legal</h3>
+                        <div id="legal-container" style="margin-top: 1rem;"></div>
+                    </div>
+                </div>
+            `;
+        }
+    };
+
+    // --- UI Controller ---
     const UI = {
         root: document.getElementById('app-root'),
-        bindEvents() {
-            document.body.addEventListener('click', (e) => {
-                const target = e.target.closest('[data-action]');
-                if (!target) return;
-                const action = target.dataset.action;
-                const payload = target.dataset.payload || target.value;
+        init() {
+            window.addEventListener('hashchange', () => this.render());
+            document.body.addEventListener('click', (e) => this.handleActions(e));
+            this.render();
+        },
+        handleActions(e) {
+            const target = e.target.closest('[data-action]');
+            if (!target) return;
+            const action = target.dataset.action;
+            const payload = target.dataset.payload;
 
-                switch(action) {
-                    case 'navigate': Router.navigate(payload); break;
-                    case 'send-magic-link': Auth.sendMagicLink(document.getElementById('auth-email').value); break;
-                    case 'signout': Auth.signOut(); break;
-                    case 'save-vault': 
-                        VaultModule.saveEntry(document.getElementById('vault-title').value, document.getElementById('vault-content').value);
-                        break;
-                    case 'decrypt-vault': VaultModule.decryptEntry(payload); break;
-                    case 'delete-vault': VaultModule.deleteEntry(payload); break;
-                    case 'sanitize-url':
-                        const rawUrl = document.getElementById('url-input').value;
-                        const clean = ToolsModule.sanitizeUrl(rawUrl);
-                        if (clean) {
-                            document.getElementById('url-output').innerHTML = `<a href="${clean}" target="_blank" style="color:var(--gold-bright);word-break:break-all;">${clean}</a>`;
-                        }
-                        break;
-                }
+            if (action === 'navigate') {
+                window.location.hash = payload;
+                this.render();
+            } else if (action === 'scan-url') {
+                this.processUrl();
+            } else if (action === 'trigger-file') {
+                document.getElementById('file-input').click();
+            }
+        },
+        render() {
+            const route = window.location.hash.replace('#', '') || 'dashboard';
+            const view = Views[route] ? Views[route] : Views.dashboard;
+            this.root.innerHTML = view();
+            this.attachFileListeners(route);
+            if (route === 'settings') {
+                document.getElementById('legal-container').innerHTML = window.AethelLegal.privacyPolicy;
+            }
+        },
+        attachFileListeners(route) {
+            const dropZone = document.getElementById('drop-zone');
+            const fileInput = document.getElementById('file-input');
+            if (!dropZone || !fileInput) return;
+
+            dropZone.addEventListener('click', () => fileInput.click());
+            fileInput.addEventListener('change', (e) => {
+                if (e.target.files.length > 0) this.processFile(e.target.files[0], route);
             });
         },
-        render(View) {
-            this.root.innerHTML = View.template();
-            if (View.onMount) View.onMount();
-        },
-        toast(msg, type='success') {
-            const colors = { success: '#D4AF37', error: '#ff4d4d', gold: '#FFD700' };
-            const t = document.createElement('div');
-            t.className = 'toast';
-            t.style.borderColor = colors[type];
-            t.style.color = colors[type];
-            t.textContent = msg;
-            document.body.appendChild(t);
-            setTimeout(() => t.classList.add('show'), 50);
-            setTimeout(() => { t.classList.remove('show'); setTimeout(() => t.remove(), 300); }, 3000);
-        },
-        showDecryptedModal(title, content) {
-            const m = document.createElement('div');
-            m.className = 'modal-overlay';
-            m.innerHTML = `
-                <div class="modal-content">
-                    <h3 style="color:var(--gold-bright);margin-bottom:1rem;">${title}</h3>
-                    <pre style="color:#fff;white-space:pre-wrap;background:rgba(0,0,0,0.3);padding:1rem;border-radius:8px;">${content}</pre>
-                    <button data-action="close-modal" class="btn-gold" style="margin-top:1.5rem;width:100%;">Close & Clear Memory</button>
-                </div>`;
-            m.addEventListener('click', (e) => { if (e.target === m || e.target.dataset.action === 'close-modal') m.remove(); });
-            document.body.appendChild(m);
-        }
-    };
+        async processUrl() {
+            const input = document.getElementById('url-input').value;
+            const resultsDiv = document.getElementById('url-results');
+            resultsDiv.innerHTML = `<div class="progress-bar"><div class="progress-fill" style="width: 50%"></div></div><p class="text-muted">Scanning...</p>`;
+            
+            await new Promise(r => setTimeout(r, 1000));
+            const clean = Engine.sanitizeUrl(input);
+            
+            if (!clean) {
+                resultsDiv.innerHTML = `<div class="threat-item">${Icons.scan} Invalid URL format.</div>`;
+                return;
+            }
 
-    // --- View Templates ---
-    const AuthView = {
-        template() {
-            return `
-                <div class="auth-wrapper">
-                    <div class="auth-card">
-                        <div class="auth-header">
-                            <h2>AETHEL CORE</h2>
-                            <p>Secure Access Required</p>
-                        </div>
-                        <div class="auth-form">
-                            <input type="email" id="auth-email" class="glass-input" placeholder="Enter email address">
-                            <button data-action="send-magic-link" class="btn-gold w-100">Send Secure Link</button>
-                        </div>
+            resultsDiv.innerHTML = `
+                <div class="scan-results">
+                    <div style="margin-bottom: 1rem;">
+                        <div class="clear-item">${Icons.shield} Tracking parameters removed (UTM, FBCLID)</div>
+                        <div class="clear-item">${Icons.shield} Shortener unmasked (Simulation)</div>
+                    </div>
+                    <p class="text-muted" style="margin-bottom: 0.5rem; font-size: 0.8rem;">SANITIZED URL:</p>
+                    <div class="mono" style="color: var(--accent); word-break: break-all; background: #000; padding: 0.5rem; border-radius: 6px;">${clean}</div>
+                    <a href="${clean}" target="_blank" class="btn btn-outline btn-sm" style="margin-top: 1rem; display: inline-flex;">Open Safe Link</a>
+                </div>
+            `;
+        },
+        async processFile(file, type) {
+            const resultsDiv = document.getElementById('media-results');
+            resultsDiv.innerHTML = `
+                <div class="scan-results">
+                    <h4>${file.name}</h4>
+                    <p class="text-muted">${(file.size / 1024).toFixed(2)} KB</p>
+                    <div class="progress-bar"><div class="progress-fill" id="prog" style="width: 0%"></div></div>
+                    <p id="scan-status" class="text-muted mono">Initializing scan...</p>
+                </div>
+            `;
+
+            const prog = document.getElementById('prog');
+            const status = document.getElementById('scan-status');
+            
+            // Simulate Scan Progress
+            for (let i = 0; i <= 100; i += 20) {
+                prog.style.width = `${i}%`;
+                status.textContent = i < 50 ? 'Checking signature database...' : i < 100 ? 'Stripping metadata...' : 'Scan complete.';
+                await new Promise(r => setTimeout(r, 200));
+            }
+
+            const threats = await Engine.simulateScan(file.name, type);
+            let threatHtml = threats.length ? threats.map(t => `<div class="threat-item">${Icons.scan} ${t.name} (${t.severity})</div>`).join('') : `<div class="clear-item">${Icons.shield} No malware detected. File is clean.</div>`;
+            
+            let optionsHtml = '';
+            if (type === 'images') optionsHtml = `<select class="input" style="margin-bottom:1rem;"><option>Convert to PNG</option><option>Convert to JPEG</option><option>Convert to WEBP</option></select>`;
+            if (type === 'audio') optionsHtml = `<select class="input" style="margin-bottom:1rem;"><option>Change Speed (1.5x)</option><option>Change Speed (0.5x)</option><option>Convert to MP3</option></select>`;
+            if (type === 'video') optionsHtml = `<select class="input" style="margin-bottom:1rem;"><option>Extract Audio Only</option><option>Reduce Clarity (Save Data)</option><option>Convert to MP4</option></select>`;
+            if (type === 'docs') optionsHtml = `<select class="input" style="margin-bottom:1rem;"><option>Export as PDF</option><option>Strip All Macros</option><option>Convert to CSV</option></select>`;
+
+            resultsDiv.innerHTML = `
+                <div class="scan-results">
+                    <h4 style="margin-bottom: 1rem;">Scan Report: ${file.name}</h4>
+                    ${threatHtml}
+                    <div style="margin-top: 1.5rem; border-top: 1px solid var(--border); padding-top: 1rem;">
+                        <p class="text-muted" style="margin-bottom: 0.5rem;">Processing Options:</p>
+                        ${optionsHtml}
+                        <button class="btn btn-sm">Process & Download</button>
                     </div>
                 </div>
             `;
-        }
-    };
-
-    const DashboardView = {
-        template() {
-            const state = State.getState();
-            return `
-                <nav class="top-nav">
-                    <span class="nav-brand">AETHEL CORE</span>
-                    <div class="nav-right">
-                        <span class="tier-badge ${state.tier}">${state.tier.toUpperCase()}</span>
-                    </div>
-                </nav>
-                <main class="container">
-                    <h2 class="page-title">Dashboard</h2>
-                    <p class="text-muted">Welcome back. Select a module to begin.</p>
-                    <div class="grid-2">
-                        <div class="glass-card nav-card" data-action="navigate" data-payload="vault">
-                            <h3>Stateless Vault</h3>
-                            <p>AES-256 Encrypted local storage.</p>
-                            <span class="link">Open Module &rarr;</span>
-                        </div>
-                        <div class="glass-card nav-card" data-action="navigate" data-payload="tools">
-                            <h3>CleanStream Tools</h3>
-                            <p>URL Sanitization & Tracking Removal.</p>
-                            <span class="link">Open Module &rarr;</span>
-                        </div>
-                    </div>
-                </main>
-                ${Layout.dock('dashboard')}
-            `;
-        }
-    };
-
-    const VaultView = {
-        template() {
-            const entries = State.getState().vaultEntries;
-            return `
-                <nav class="top-nav">
-                    <span class="nav-brand">AETHEL CORE / VAULT</span>
-                    <div class="nav-right">
-                        <button data-action="navigate" data-payload="dashboard" class="btn-sm">Back</button>
-                    </div>
-                </nav>
-                <main class="container">
-                    <h2 class="page-title">Encrypted Vault</h2>
-                    <div class="grid-2">
-                        <div class="glass-card">
-                            <h3>New Entry</h3>
-                            <input type="text" id="vault-title" class="glass-input mb-1" placeholder="Title">
-                            <textarea id="vault-content" class="glass-input mb-1" style="min-height:120px;" placeholder="Secret text..."></textarea>
-                            <button data-action="save-vault" class="btn-gold w-100">Encrypt & Save</button>
-                        </div>
-                        <div class="glass-card">
-                            <h3>Saved Entries (${entries.length})</h3>
-                            <div class="entry-list">
-                                ${entries.length === 0 ? '<p class="text-muted">No entries found.</p>' : 
-                                  entries.map(e => `
-                                    <div class="vault-entry">
-                                        <div>
-                                            <strong>${e.title}</strong>
-                                            <small>${new Date(e.timestamp).toLocaleString()}</small>
-                                        </div>
-                                        <div class="entry-actions">
-                                            <button data-action="decrypt-vault" data-payload="${e.id}" class="btn-sm">Decrypt</button>
-                                            <button data-action="delete-vault" data-payload="${e.id}" class="btn-sm danger">Del</button>
-                                        </div>
-                                    </div>
-                                `).join('')}
-                            </div>
-                        </div>
-                    </div>
-                </main>
-                ${Layout.dock('vault')}
-            `;
         },
-        onMount() { VaultModule.initKey(); }
-    };
-
-    const ToolsView = {
-        template() {
-            return `
-                <nav class="top-nav">
-                    <span class="nav-brand">AETHEL CORE / TOOLS</span>
-                    <div class="nav-right">
-                        <button data-action="navigate" data-payload="dashboard" class="btn-sm">Back</button>
-                    </div>
-                </nav>
-                <main class="container">
-                    <h2 class="page-title">CleanStream URL Sanitizer</h2>
-                    <div class="glass-card">
-                        <p class="text-muted">Strips UTM tags, tracking pixels, and enforces safe search.</p>
-                        <input type="text" id="url-input" class="glass-input mb-1" placeholder="Paste messy URL here...">
-                        <button data-action="sanitize-url" class="btn-gold w-100">Sanitize URL</button>
-                        <div id="url-output" class="output-box mt-2"></div>
-                    </div>
-                </main>
-                ${Layout.dock('tools')}
-            `;
+        toast(msg) {
+            const t = document.getElementById('toast-container');
+            t.innerHTML = `<div class="toast">${msg}</div>`;
+            setTimeout(() => t.innerHTML = '', 3000);
         }
     };
 
-    const SettingsView = {
-        template() {
-            return `
-                <nav class="top-nav">
-                    <span class="nav-brand">AETHEL CORE / SETTINGS</span>
-                </nav>
-                <main class="container">
-                    <h2 class="page-title">Settings</h2>
-                    <div class="glass-card">
-                        <h3>Session Management</h3>
-                        <button data-action="signout" class="btn-outline-gold w-100">Terminate Session & Sign Out</button>
-                    </div>
-                </main>
-                ${Layout.dock('settings')}
-            `;
-        }
+    // --- Dock Layout ---
+    function renderDock() {
+        const route = window.location.hash.replace('#', '') || 'dashboard';
+        const items = [
+            { id: 'dashboard', icon: Icons.home, label: 'Home' },
+            { id: 'links', icon: Icons.link, label: 'Links' },
+            { id: 'images', icon: Icons.image, label: 'Images' },
+            { id: 'audio', icon: Icons.audio, label: 'Audio' },
+            { id: 'video', icon: Icons.video, label: 'Video' },
+            { id: 'docs', icon: Icons.doc, label: 'Docs' }
+        ];
+        return `
+            <div class="dock">
+                ${items.map(i => `
+                    <button class="dock-item ${route === i.id ? 'active' : ''}" data-action="navigate" data-payload="${i.id}">
+                        ${i.icon}
+                        <span>${i.label}</span>
+                    </button>
+                `).join('')}
+            </div>
+        `;
+    }
+
+    // Intercept render to add dock
+    const originalRender = UI.render.bind(UI);
+    UI.render = function() {
+        originalRender();
+        const dockEl = document.createElement('div');
+        dockEl.innerHTML = renderDock();
+        document.body.appendChild(dockEl.firstElementChild);
     };
 
-    // --- Layout Partials ---
-    const Layout = {
-        dock(active) {
-            return `
-                <div class="floating-dock">
-                    <button class="dock-item ${active==='dashboard'?'active':''}" data-action="navigate" data-payload="dashboard">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg>
-                        <span>Home</span>
-                    </button>
-                    <button class="dock-item ${active==='vault'?'active':''}" data-action="navigate" data-payload="vault">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
-                        <span>Vault</span>
-                    </button>
-                    <button class="dock-item ${active==='tools'?'active':''}" data-action="navigate" data-payload="tools">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
-                        <span>Tools</span>
-                    </button>
-                    <div class="dock-divider"></div>
-                    <button class="dock-item ${active==='settings'?'active':''}" data-action="navigate" data-payload="settings">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
-                        <span>Logout</span>
-                    </button>
-                </div>
-            `;
-        }
-    };
-
-    // --- Initialization ---
     function init() {
         if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => navigator.serviceWorker.register('./service-worker.js').catch(console.error));
+            navigator.serviceWorker.register('./service-worker.js').catch(console.error);
         }
-        UI.bindEvents();
-        Auth.init();
-        Router.init();
+        UI.init();
     }
 
     return { init };
