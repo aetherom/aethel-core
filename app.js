@@ -1,6 +1,51 @@
 window.AethelCore = (function() {
     'use strict';
 
+    // Dynamically load JSZip for Batch Processing
+    async function ensureJsZip() {
+        if (window.JSZip) return;
+        await new Promise((resolve, reject) => {
+            const s = document.createElement('script');
+            s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
+            s.onload = resolve;
+            s.onerror = () => reject(new Error("Failed to load Zip library."));
+            document.head.appendChild(s);
+        });
+    }
+
+    // Utility: Base32 to Uint8Array (for TOTP)
+    function base32ToUint8Array(base32) {
+        const base32chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+        let bits = 0, value = 0;
+        let bytes = [];
+        for (let i = 0; i < base32.length; i++) {
+            let char = base32[i].toUpperCase();
+            if (char === '=') break;
+            let val = base32chars.indexOf(char);
+            if (val === -1) continue;
+            value = (value << 5) | val;
+            bits += 5;
+            if (bits >= 8) {
+                bytes.push((value >> (bits - 8)) & 0xFF);
+                bits -= 8;
+            }
+        }
+        return new Uint8Array(bytes);
+    }
+
+    // Utility: Shannon Entropy Calculator
+    function calculateEntropy(str) {
+        if (!str) return 0;
+        const freq = {};
+        for (let char of str) freq[char] = (freq[char] || 0) + 1;
+        let entropy = 0;
+        for (let key in freq) {
+            let p = freq[key] / str.length;
+            entropy -= p * Math.log2(p);
+        }
+        return Math.round(entropy * str.length);
+    }
+
     const Icons = {
         shield: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>`,
         link: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>`,
@@ -11,7 +56,13 @@ window.AethelCore = (function() {
         home: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg>`,
         lock: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>`,
         scan: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7V5a2 2 0 0 1 2-2h2"></path><path d="M17 3h2a2 2 0 0 1 2 2v2"></path><path d="M21 17v2a2 2 0 0 1-2 2h-2"></path><path d="M7 21H5a2 2 0 0 1-2-2v-2"></path><line x1="7" y1="12" x2="17" y2="12"></line></svg>`,
-        download: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>`
+        download: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>`,
+        notes: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="8" y1="13" x2="16" y2="13"></line><line x1="8" y1="17" x2="16" y2="17"></line></svg>`,
+        verify: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>`,
+        totp: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>`,
+        stego: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>`,
+        batch: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>`,
+        copy: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`
     };
 
     const CryptoEngine = {
@@ -31,6 +82,17 @@ window.AethelCore = (function() {
         },
         async decryptBuffer(key, cipher, iv) {
             return await window.crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, cipher);
+        },
+        async deriveKey(password, salt) {
+            const enc = new TextEncoder();
+            const keyMaterial = await crypto.subtle.importKey("raw", enc.encode(password), "PBKDF2", false, ["deriveKey"]);
+            return await crypto.subtle.deriveKey(
+                { name: "PBKDF2", salt: salt, iterations: 100000, hash: "SHA-256" },
+                keyMaterial,
+                { name: "AES-GCM", length: 256 },
+                false,
+                ["encrypt", "decrypt"]
+            );
         }
     };
 
@@ -68,12 +130,17 @@ window.AethelCore = (function() {
     const Views = {
         dashboard() {
             const modules = [
-                { id: 'links', title: 'Link Tools', desc: 'Sanitize, Shorten & Reveal URLs', icon: Icons.link },
-                { id: 'images', title: 'Image Clean', desc: 'Convert to PDF/Word & E2E Encrypt', icon: Icons.image },
+                { id: 'links', title: 'Link Tools', desc: 'Sanitize, Shorten, Reveal & Analyze', icon: Icons.link },
+                { id: 'images', title: 'Image Clean', desc: 'Convert, Strip EXIF & E2E Encrypt', icon: Icons.image },
                 { id: 'audio', title: 'Audio Studio', desc: 'Process & extract tracks', icon: Icons.audio },
                 { id: 'video', title: 'Video Studio', desc: 'Process & download media', icon: Icons.video },
                 { id: 'docs', title: 'Document Vault', desc: 'Convert to PDF/Word/TXT & Encrypt', icon: Icons.doc },
-                { id: 'vault', title: 'E2E Decrypter', desc: 'Decrypt .aethel encrypted files', icon: Icons.lock }
+                { id: 'vault', title: 'E2E Decrypter', desc: 'Decrypt .aethel encrypted files', icon: Icons.lock },
+                { id: 'notes', title: 'Secure Notes', desc: 'E2E Encrypted Local Notepad', icon: Icons.notes },
+                { id: 'verify', title: 'Integrity Verifier', desc: 'Verify SHA-256 File Hashes', icon: Icons.verify },
+                { id: 'totp', title: 'TOTP Generator', desc: 'Client-side 2FA Codes', icon: Icons.totp },
+                { id: 'stego', title: 'Steganography', desc: 'Hide text inside images', icon: Icons.stego },
+                { id: 'batch', title: 'Batch Zipper', desc: 'Scan, Encrypt & Zip multiple files', icon: Icons.batch }
             ];
             return `
                 <nav class="top-nav">
@@ -107,6 +174,7 @@ window.AethelCore = (function() {
                             <button class="tab active" data-tab="sanitize">Sanitize</button>
                             <button class="tab" data-tab="shorten">Shorten</button>
                             <button class="tab" data-tab="reveal">Reveal</button>
+                            <button class="tab" data-tab="analyze">Analyze</button>
                         </div>
                         <div id="tab-content">
                             <div class="input-group">
@@ -161,7 +229,124 @@ window.AethelCore = (function() {
                             <input type="file" id="file-input" accept=".enc,.aethel.enc" hidden>
                         </div>
                         <input type="text" id="decrypt-key" class="input" style="margin-top:1rem;" placeholder="Paste decryption key here...">
+                        <div id="entropy-meter" style="margin-top: 0.5rem; font-size: 0.8rem; color: var(--text-muted);"></div>
                         <button class="btn" data-action="decrypt-file" style="margin-top:1rem; width:100%;">${Icons.lock} Decrypt & Download</button>
+                        <div id="media-results"></div>
+                    </div>
+                </div>
+            `;
+        },
+
+        notes() {
+            return `
+                <nav class="top-nav">
+                    <div class="nav-brand">${Icons.notes} SECURE NOTES</div>
+                    <button class="btn btn-outline btn-sm" data-action="navigate" data-payload="dashboard">Back</button>
+                </nav>
+                <div class="container">
+                    <div class="card">
+                        <h3 style="margin-bottom: 1rem;">E2E Encrypted Notepad</h3>
+                        <p class="text-muted" style="margin-bottom: 1rem;">Notes are encrypted with your password via PBKDF2 (100k iterations) and stored locally. No server, no cloud.</p>
+                        <textarea id="note-input" class="input" style="min-height: 200px; font-family: 'JetBrains Mono', monospace;" placeholder="Type your secret note here..."></textarea>
+                        <div class="grid-2" style="margin-top:1rem;">
+                            <input type="password" id="note-pass" class="input" placeholder="Encryption Password">
+                            <button class="btn" data-action="save-note">${Icons.lock} Save Encrypted</button>
+                        </div>
+                        <button class="btn btn-outline" data-action="load-note" style="margin-top:1rem; width:100%;">${Icons.download} Decrypt & Load Note</button>
+                        <div id="media-results"></div>
+                    </div>
+                </div>
+            `;
+        },
+
+        verify() {
+            return `
+                <nav class="top-nav">
+                    <div class="nav-brand">${Icons.verify} INTEGRITY VERIFIER</div>
+                    <button class="btn btn-outline btn-sm" data-action="navigate" data-payload="dashboard">Back</button>
+                </nav>
+                <div class="container">
+                    <div class="card">
+                        <h3 style="margin-bottom: 1rem;">File Integrity Check</h3>
+                        <p class="text-muted" style="margin-bottom: 1rem;">Verify file authenticity by comparing SHA-256 hashes.</p>
+                        <div class="drop-zone" id="drop-zone">
+                            ${Icons.verify}
+                            <p style="margin-top: 1rem;">Upload File to Verify</p>
+                            <input type="file" id="file-input" hidden>
+                        </div>
+                        <input type="text" id="expected-hash" class="input" style="margin-top:1rem;" placeholder="Paste expected SHA-256 hash...">
+                        <button class="btn" data-action="verify-file" style="margin-top:1rem; width:100%;">${Icons.scan} Verify Integrity</button>
+                        <div id="media-results"></div>
+                    </div>
+                </div>
+            `;
+        },
+
+        totp() {
+            return `
+                <nav class="top-nav">
+                    <div class="nav-brand">${Icons.totp} TOTP GENERATOR</div>
+                    <button class="btn btn-outline btn-sm" data-action="navigate" data-payload="dashboard">Back</button>
+                </nav>
+                <div class="container">
+                    <div class="card">
+                        <h3 style="margin-bottom: 1rem;">2FA Code Generator</h3>
+                        <p class="text-muted" style="margin-bottom: 1rem;">Generate RFC 6238 TOTP codes. Secrets never leave your browser.</p>
+                        <input type="text" id="totp-secret" class="input" style="margin-bottom:1rem;" placeholder="Paste Base32 Secret (e.g. JBSWY3DPEHPK3PXP)">
+                        <div id="totp-result" style="text-align: center; margin-top: 2rem;">
+                            <div class="mono" id="totp-code" style="font-size: 3rem; font-weight: bold; color: var(--accent); letter-spacing: 5px;">------</div>
+                            <p class="text-muted" id="totp-timer" style="margin-top: 0.5rem;">Expires in: 30s</p>
+                        </div>
+                    </div>
+                </div>
+            `;
+        },
+
+        stego() {
+            return `
+                <nav class="top-nav">
+                    <div class="nav-brand">${Icons.stego} STEGANOGRAPHY</div>
+                    <button class="btn btn-outline btn-sm" data-action="navigate" data-payload="dashboard">Back</button>
+                </nav>
+                <div class="container">
+                    <div class="card">
+                        <div class="tabs">
+                            <button class="tab active" data-tab="stego-hide">Hide Message</button>
+                            <button class="tab" data-tab="stego-extract">Extract Message</button>
+                        </div>
+                        <div id="tab-content">
+                            <div class="drop-zone" id="drop-zone">
+                                ${Icons.image}
+                                <p style="margin-top: 1rem;">Upload PNG Image</p>
+                                <input type="file" id="file-input" accept="image/png" hidden>
+                            </div>
+                            <div id="stego-controls" style="margin-top:1rem;"></div>
+                        </div>
+                        <div id="media-results"></div>
+                    </div>
+                </div>
+            `;
+        },
+
+        batch() {
+            return `
+                <nav class="top-nav">
+                    <div class="nav-brand">${Icons.batch} BATCH ZIPPER</div>
+                    <button class="btn btn-outline btn-sm" data-action="navigate" data-payload="dashboard">Back</button>
+                </nav>
+                <div class="container">
+                    <div class="card">
+                        <h3 style="margin-bottom: 1rem;">Batch Process & Zip</h3>
+                        <p class="text-muted" style="margin-bottom: 1rem;">Upload multiple files. They will be scanned, and optionally E2E encrypted, then zipped for download.</p>
+                        <div class="drop-zone" id="drop-zone">
+                            ${Icons.batch}
+                            <p style="margin-top: 1rem;">Drag & drop multiple files</p>
+                            <input type="file" id="file-input" multiple hidden>
+                        </div>
+                        <div class="grid-2" style="margin-top:1rem;">
+                            <button class="btn btn-outline" data-action="batch-process" data-mode="zip">Zip Clean Files</button>
+                            <button class="btn btn-warning" data-action="batch-process" data-mode="encrypt">E2E Encrypt & Zip</button>
+                        </div>
                         <div id="media-results"></div>
                     </div>
                 </div>
@@ -193,6 +378,8 @@ window.AethelCore = (function() {
         root: document.getElementById('app-root'),
         currentFile: null,
         encryptedFile: null,
+        currentFiles: [],
+        totpInterval: null,
         
         init() {
             window.addEventListener('hashchange', () => this.render());
@@ -207,7 +394,11 @@ window.AethelCore = (function() {
             if (tab) {
                 document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
                 tab.classList.add('active');
-                this.updateLinkTab(tab.dataset.tab);
+                if (tab.dataset.tab.startsWith('stego-')) {
+                    this.updateStegoTab(tab.dataset.tab);
+                } else {
+                    this.updateLinkTab(tab.dataset.tab);
+                }
                 return;
             }
 
@@ -231,16 +422,44 @@ window.AethelCore = (function() {
             else if (action === 'encrypt-file') { this.e2eEncryptFile(); }
             else if (action === 'decrypt-file') { this.e2eDecryptFile(); }
             else if (action === 'clear-cache') { this.clearCache(); }
+            else if (action === 'save-note') { this.saveNote(); }
+            else if (action === 'load-note') { this.loadNote(); }
+            else if (action === 'verify-file') { this.verifyFile(); }
+            else if (action === 'batch-process') { this.batchProcess(target.dataset.mode); }
+            else if (action === 'stego-process') { this.stegoProcess(target.dataset.mode); }
+            else if (action === 'copy-url') { this.copyWithExpiry(document.querySelector('#url-results .mono').innerText); }
+            else if (action === 'copy-key') { this.copyWithExpiry(document.querySelector('.key-box').innerText); }
         },
         
         render() {
+            if (this.totpInterval) clearInterval(this.totpInterval);
             const route = window.location.hash.replace('#', '') || 'dashboard';
             const view = Views[route] ? Views[route] : Views.dashboard;
             this.root.innerHTML = view();
             this.attachFileListeners(route);
+            
             if (route === 'settings') {
                 const legalEl = document.getElementById('legal-container');
                 if (legalEl && window.AethelLegal) legalEl.innerHTML = window.AethelLegal.privacyPolicy;
+            }
+            if (route === 'vault' || route === 'notes') {
+                const keyInput = document.getElementById(route === 'vault' ? 'decrypt-key' : 'note-pass');
+                if (keyInput) {
+                    keyInput.addEventListener('input', (e) => {
+                        const entropy = calculateEntropy(e.target.value);
+                        let label = "Weak", color = "var(--danger)";
+                        if (entropy > 80) { label = "Strong"; color = "var(--accent)"; }
+                        else if (entropy > 50) { label = "Moderate"; color = "var(--warning)"; }
+                        const meter = document.getElementById('entropy-meter');
+                        if (meter) meter.innerHTML = `Password Strength: <span style="color:${color}">${entropy} bits (${label})</span>`;
+                    });
+                }
+            }
+            if (route === 'totp') {
+                document.getElementById('totp-secret').addEventListener('input', (e) => this.startTOTP(e.target.value));
+            }
+            if (route === 'stego') {
+                this.updateStegoTab('stego-hide');
             }
         },
         
@@ -252,9 +471,12 @@ window.AethelCore = (function() {
             dropZone.addEventListener('click', () => fileInput.click());
             fileInput.addEventListener('change', (e) => {
                 if (e.target.files.length > 0) {
+                    this.currentFiles = Array.from(e.target.files);
                     if (route === 'vault') {
                         this.encryptedFile = e.target.files[0];
                         document.getElementById('media-results').innerHTML = `<div class="clear-item">${Icons.lock} Encrypted file loaded: ${this.encryptedFile.name}</div>`;
+                    } else if (route === 'batch') {
+                        document.getElementById('media-results').innerHTML = `<div class="clear-item">${Icons.batch} ${this.currentFiles.length} files loaded. Select an action above.</div>`;
                     } else {
                         this.processFile(e.target.files[0], route);
                     }
@@ -267,9 +489,12 @@ window.AethelCore = (function() {
                 e.preventDefault();
                 dropZone.classList.remove('dragover');
                 if (e.dataTransfer.files.length > 0) {
+                    this.currentFiles = Array.from(e.dataTransfer.files);
                     if (route === 'vault') {
                         this.encryptedFile = e.dataTransfer.files[0];
                         document.getElementById('media-results').innerHTML = `<div class="clear-item">${Icons.lock} Encrypted file loaded: ${this.encryptedFile.name}</div>`;
+                    } else if (route === 'batch') {
+                        document.getElementById('media-results').innerHTML = `<div class="clear-item">${Icons.batch} ${this.currentFiles.length} files loaded. Select an action above.</div>`;
                     } else {
                         this.processFile(e.dataTransfer.files[0], route);
                     }
@@ -291,6 +516,24 @@ window.AethelCore = (function() {
             if (mode === 'sanitize') { input.placeholder = 'Paste messy URL to clean...'; btn.innerHTML = `${Icons.scan} Sanitize`; }
             if (mode === 'shorten') { input.placeholder = 'Paste long URL to shorten...'; btn.innerHTML = `${Icons.link} Shorten`; }
             if (mode === 'reveal') { input.placeholder = 'Paste short URL to reveal...'; btn.innerHTML = `${Icons.scan} Reveal`; }
+            if (mode === 'analyze') { input.placeholder = 'Paste URL to check for phishing...'; btn.innerHTML = `${Icons.scan} Analyze`; }
+        },
+
+        updateStegoTab(mode) {
+            const controls = document.getElementById('stego-controls');
+            const resultsDiv = document.getElementById('media-results');
+            if (resultsDiv) resultsDiv.innerHTML = '';
+            if (!controls) return;
+            if (mode === 'stego-hide') {
+                controls.innerHTML = `
+                    <input type="text" id="stego-msg" class="input" style="margin-bottom:1rem;" placeholder="Secret message to hide...">
+                    <button class="btn" data-action="stego-process" data-mode="hide" style="width:100%;">${Icons.lock} Hide & Download</button>
+                `;
+            } else {
+                controls.innerHTML = `
+                    <button class="btn" data-action="stego-process" data-mode="extract" style="width:100%;">${Icons.scan} Extract Message</button>
+                `;
+            }
         },
         
         async processUrl(mode) {
@@ -301,34 +544,68 @@ window.AethelCore = (function() {
                 if (mode === 'sanitize') {
                     const url = new URL(input.startsWith('http') ? input : `https://${input}`);
                     ['utm_source', 'utm_medium', 'gclid', 'fbclid'].forEach(p => url.searchParams.delete(p));
-                    this.showUrlResult("Sanitized URL", url.toString());
+                    this.showUrlResult("Sanitized URL", url.toString(), true);
                 } else if (mode === 'shorten') {
                     const proxyUrl = `https://corsproxy.io/?url=${encodeURIComponent(`https://is.gd/create.php?format=simple&url=${encodeURIComponent(input)}`)}`;
                     const res = await fetch(proxyUrl);
                     const shortUrl = await res.text();
                     if(shortUrl.startsWith('Error') || shortUrl.includes('html')) throw new Error("Could not shorten URL.");
-                    this.showUrlResult("Shortened URL", shortUrl.trim());
+                    this.showUrlResult("Shortened URL", shortUrl.trim(), true);
                 } else if (mode === 'reveal') {
                     const proxyUrl = `https://corsproxy.io/?url=${encodeURIComponent(`https://api.allorigins.win/get?url=${encodeURIComponent(input)}`)}`;
                     const res = await fetch(proxyUrl);
                     const data = await res.json();
-                    if(data.status.url) this.showUrlResult("Final Destination", data.status.url);
+                    if(data.status.url) this.showUrlResult("Final Destination", data.status.url, true);
                     else throw new Error("Could not reveal URL");
+                } else if (mode === 'analyze') {
+                    let warnings = [];
+                    try {
+                        const urlStr = input.startsWith('http') ? input : `https://${input}`;
+                        const url = new URL(urlStr);
+                        if (/^(\d{1,3}\.){3}\d{1,3}$/.test(url.hostname)) warnings.push("Uses an IP address instead of a domain name.");
+                        if (url.hostname.includes('xn--')) warnings.push("Uses Punycode/IDN characters (potential homograph attack).");
+                        const suspiciousTLDs = ['.tk', '.ml', '.ga', '.cf', '.gq', '.top', '.xyz', '.work'];
+                        if (suspiciousTLDs.some(tld => url.hostname.endsWith(tld))) warnings.push("Uses a frequently abused TLD.");
+                        if ((url.hostname.match(/\./g) || []).length > 3) warnings.push("Excessive subdomains detected.");
+                        if (url.username || url.password) warnings.push("Contains credentials in the URL (phishing trick).");
+                        if (url.search.length > 100) warnings.push("Extremely long query string (suspicious).");
+                    } catch (e) { warnings.push("Invalid URL format."); }
+                    
+                    if (warnings.length === 0) {
+                        resultsDiv.innerHTML = `<div class="scan-results"><div class="clear-item">${Icons.shield} No obvious phishing indicators detected.</div></div>`;
+                    } else {
+                        resultsDiv.innerHTML = `<div class="scan-results"><div class="threat-item" style="flex-direction:column; align-items:flex-start; text-align:left; margin-bottom:1rem;">${warnings.map(w => `<div style="margin-bottom:0.5rem;">⚠ ${w}</div>`).join('')}</div></div>`;
+                    }
                 }
             } catch (err) {
                 resultsDiv.innerHTML = `<div class="threat-item">${Icons.scan} Error: ${err.message}</div>`;
             }
         },
 
-        showUrlResult(label, url) {
+        showUrlResult(label, url, allowCopy = false) {
             document.getElementById('url-results').innerHTML = `
                 <div class="scan-results">
                     <div class="clear-item">${Icons.shield} Success</div>
                     <p class="text-muted" style="margin: 1rem 0 0.5rem; font-size: 0.8rem;">${label.toUpperCase()}:</p>
                     <div class="mono" style="color: var(--accent); word-break: break-all; background: #000; padding: 0.5rem; border-radius: 6px;">${url}</div>
-                    <a href="${url}" target="_blank" class="btn btn-outline btn-sm" style="margin-top: 1rem; display: inline-flex;">Open Link</a>
+                    <div style="display:flex; gap:0.5rem; margin-top: 1rem;">
+                        <a href="${url}" target="_blank" class="btn btn-outline btn-sm" style="text-decoration:none; flex:1;">Open Link</a>
+                        ${allowCopy ? `<button class="btn btn-sm" data-action="copy-url" style="flex:1;">${Icons.copy} Copy (30s)</button>` : ''}
+                    </div>
                 </div>
             `;
+        },
+
+        async copyWithExpiry(text) {
+            try {
+                await navigator.clipboard.writeText(text);
+                this.toast('Copied! Clipboard auto-clears in 30s.');
+                setTimeout(() => {
+                    navigator.clipboard.writeText('').then(() => this.toast('Clipboard auto-cleared.'));
+                }, 30000);
+            } catch (e) {
+                this.toast('Clipboard access denied by browser.');
+            }
         },
         
         async processFile(file, type) {
@@ -358,7 +635,6 @@ window.AethelCore = (function() {
                 status.textContent = 'Running Heuristic Structural Analysis...';
                 
                 const scanResult = await JSScanner.scan(file);
-                
                 prog.style.width = '100%';
 
                 if (!scanResult.clean) {
@@ -382,9 +658,9 @@ window.AethelCore = (function() {
                     mediaContainer.innerHTML = `<img src="${url}" style="max-width:100%; border-radius:8px; margin-bottom:1rem;">`;
                     actionContainer.innerHTML = `
                         <select class="input" id="format-select" style="margin-bottom:1rem;">
+                            <option value="clean">Strip Metadata (Original Format)</option>
                             <option value="png">Convert to PNG</option>
                             <option value="jpeg">Convert to JPEG</option>
-                            <option value="webp">Convert to WEBP</option>
                             <option value="pdf">Convert to PDF Document</option>
                             <option value="doc">Convert to Word Document (.doc)</option>
                         </select>
@@ -429,11 +705,17 @@ window.AethelCore = (function() {
                         </select>
                         <button class="btn btn-sm" data-action="process-doc" style="width:100%; margin-bottom:0.5rem;">${Icons.download} Process & Download</button>
                     `;
+                } else if (type === 'verify') {
+                    actionContainer.innerHTML = `<p class="text-muted">File loaded. Paste hash and click verify.</p>`;
+                } else if (type === 'stego') {
+                    actionContainer.innerHTML = `<p class="text-muted">Image loaded. Choose action above.</p>`;
                 }
 
-                actionContainer.innerHTML += `
-                    <button class="btn btn-sm btn-warning" data-action="encrypt-file" style="width:100%;">${Icons.lock} E2E Encrypt & Export</button>
-                `;
+                if (type !== 'verify' && type !== 'stego') {
+                    actionContainer.innerHTML += `
+                        <button class="btn btn-sm btn-warning" data-action="encrypt-file" style="width:100%;">${Icons.lock} E2E Encrypt & Export</button>
+                    `;
+                }
             } catch (err) {
                 resultsDiv.innerHTML = `<div class="threat-item">Error processing file: ${err.message}</div>`;
             }
@@ -441,12 +723,27 @@ window.AethelCore = (function() {
         
         async convertImage() {
             const format = document.getElementById('format-select').value;
-            this.toast(`Converting image to ${format.toUpperCase()}...`);
+            this.toast(`Processing image (${format.toUpperCase()})...`);
             try {
                 const img = new Image();
                 img.src = URL.createObjectURL(this.currentFile);
                 await new Promise(r => img.onload = r);
                 
+                if (format === 'clean') {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                    canvas.getContext('2d').drawImage(img, 0, 0);
+                    canvas.toBlob((blob) => {
+                        const a = document.createElement('a');
+                        a.href = URL.createObjectURL(blob);
+                        a.download = `stripped_${this.currentFile.name}`;
+                        a.click();
+                        this.toast('Metadata stripped!');
+                    }, this.currentFile.type || 'image/png');
+                    return;
+                }
+
                 if (format === 'pdf') {
                     if (!window.jspdf) throw new Error("PDF library not loaded.");
                     const { jsPDF } = window.jspdf;
@@ -567,7 +864,8 @@ window.AethelCore = (function() {
                         <div class="clear-item">${Icons.lock} File E2E Encrypted successfully!</div>
                         <p class="text-muted" style="margin: 1rem 0 0.5rem;">Your Secret Decryption Key (Save this securely, it cannot be recovered):</p>
                         <div class="key-box">${keyString}</div>
-                        <p class="text-muted" style="font-size:0.8rem;">The encrypted file has been downloaded. Share it via any channel. No one can open it without this key.</p>
+                        <button class="btn btn-sm" data-action="copy-key" style="width:100%; margin-top:0.5rem;">${Icons.copy} Copy Key (Auto-clears in 30s)</button>
+                        <p class="text-muted" style="font-size:0.8rem; margin-top:1rem;">The encrypted file has been downloaded. Share it via any channel. No one can open it without this key.</p>
                     </div>
                 `;
                 this.toast('Encrypted file exported!');
@@ -598,6 +896,174 @@ window.AethelCore = (function() {
             } catch (err) {
                 document.getElementById('media-results').innerHTML += `<div class="threat-item" style="margin-top:1rem;">${Icons.scan} Decryption failed: Invalid key or corrupted file.</div>`;
             }
+        },
+
+        async saveNote() {
+            const pass = document.getElementById('note-pass').value;
+            const text = document.getElementById('note-input').value;
+            if (!pass || !text) return this.toast('Password and text required.');
+            this.toast('Encrypting note...');
+            try {
+                const salt = crypto.getRandomValues(new Uint8Array(16));
+                const iv = crypto.getRandomValues(new Uint8Array(12));
+                const key = await CryptoEngine.deriveKey(pass, salt);
+                const cipher = await crypto.subtle.encrypt({name: "AES-GCM", iv}, key, new TextEncoder().encode(text));
+                const stored = {
+                    salt: btoa(String.fromCharCode(...salt)),
+                    iv: btoa(String.fromCharCode(...iv)),
+                    cipher: btoa(String.fromCharCode(...new Uint8Array(cipher)))
+                };
+                localStorage.setItem('aethel_note', JSON.stringify(stored));
+                this.toast('Note encrypted and saved locally!');
+            } catch (e) { this.toast('Encryption failed.'); }
+        },
+
+        async loadNote() {
+            const pass = document.getElementById('note-pass').value;
+            const stored = localStorage.getItem('aethel_note');
+            if (!pass) return this.toast('Password required.');
+            if (!stored) return this.toast('No note found.');
+            this.toast('Decrypting note...');
+            try {
+                const data = JSON.parse(stored);
+                const salt = Uint8Array.from(atob(data.salt), c => c.charCodeAt(0));
+                const iv = Uint8Array.from(atob(data.iv), c => c.charCodeAt(0));
+                const cipher = Uint8Array.from(atob(data.cipher), c => c.charCodeAt(0));
+                const key = await CryptoEngine.deriveKey(pass, salt);
+                const decrypted = await crypto.subtle.decrypt({name: "AES-GCM", iv}, key, cipher);
+                document.getElementById('note-input').value = new TextDecoder().decode(decrypted);
+                this.toast('Note decrypted!');
+            } catch (e) { this.toast('Decryption failed. Wrong password?'); }
+        },
+
+        async verifyFile() {
+            const expected = document.getElementById('expected-hash').value.trim().toLowerCase();
+            if (!this.currentFile || !expected) return this.toast('File and hash required.');
+            this.toast('Calculating hash...');
+            const actual = await JSScanner.getSHA256(this.currentFile);
+            const resultsDiv = document.getElementById('media-results');
+            if (actual === expected) {
+                resultsDiv.innerHTML = `<div class="clear-item">${Icons.verify} Hashes match! File is authentic.</div>`;
+            } else {
+                resultsDiv.innerHTML = `<div class="threat-item">${Icons.scan} Hash mismatch! File may be corrupted or tampered with.</div>`;
+            }
+        },
+
+        async startTOTP(secret) {
+            if (this.totpInterval) clearInterval(this.totpInterval);
+            if (!secret) return;
+            try {
+                const updateCode = async () => {
+                    try {
+                        const key = await crypto.subtle.importKey("raw", base32ToUint8Array(secret), {name: "HMAC", hash: "SHA-1"}, false, ["sign"]);
+                        const epoch = Math.floor(Date.now() / 1000);
+                        const counter = Math.floor(epoch / 30);
+                        const buffer = new ArrayBuffer(8);
+                        const view = new DataView(buffer);
+                        view.setUint32(4, counter);
+                        const hmac = await crypto.subtle.sign("HMAC", key, buffer);
+                        const bytes = new Uint8Array(hmac);
+                        const offset = bytes[bytes.length - 1] & 0xf;
+                        const binary = ((bytes[offset] & 0x7f) << 24) | ((bytes[offset + 1] & 0xff) << 16) | ((bytes[offset + 2] & 0xff) << 8) | (bytes[offset + 3] & 0xff);
+                        const code = (binary % 1000000).toString().padStart(6, '0');
+                        document.getElementById('totp-code').textContent = code;
+                        const timeLeft = 30 - (epoch % 30);
+                        document.getElementById('totp-timer').textContent = `Expires in: ${timeLeft}s`;
+                    } catch (e) {}
+                };
+                updateCode();
+                this.totpInterval = setInterval(updateCode, 1000);
+            } catch (e) { document.getElementById('totp-code').textContent = "ERROR"; }
+        },
+
+        async stegoProcess(mode) {
+            if (!this.currentFile) return this.toast('Upload a PNG first.');
+            const img = new Image();
+            img.src = URL.createObjectURL(this.currentFile);
+            await new Promise(r => img.onload = r);
+
+            const canvas = document.createElement('canvas');
+            canvas.width = img.width;
+            canvas.height = img.height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0);
+
+            if (mode === 'hide') {
+                const msg = document.getElementById('stego-msg').value;
+                if (!msg) return this.toast('Enter a message to hide.');
+                const msgBytes = new TextEncoder().encode(msg + '\0\0\0\0');
+                const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                if (msgBytes.length * 8 > imgData.data.length) return this.toast('Image too small for message.');
+                for (let i = 0; i < msgBytes.length; i++) {
+                    for (let bit = 0; bit < 8; bit++) {
+                        imgData.data[i * 8 + bit] = (imgData.data[i * 8 + bit] & 0xFE) | ((msgBytes[i] >> (7 - bit)) & 1);
+                    }
+                }
+                ctx.putImageData(imgData, 0, 0);
+                canvas.toBlob((blob) => {
+                    const a = document.createElement('a');
+                    a.href = URL.createObjectURL(blob);
+                    a.download = `stego_${this.currentFile.name}`;
+                    a.click();
+                    this.toast('Message hidden in image!');
+                }, 'image/png');
+            } else {
+                const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                let bytes = [];
+                for (let i = 0; i < imgData.data.length; i += 8) {
+                    let byte = 0;
+                    for (let bit = 0; bit < 8; bit++) byte = (byte << 1) | (imgData.data[i + bit] & 1);
+                    bytes.push(byte);
+                    if (bytes.length >= 3 && bytes[bytes.length-1] === 0 && bytes[bytes.length-2] === 0 && bytes[bytes.length-3] === 0) {
+                        bytes = bytes.slice(0, -3);
+                        document.getElementById('media-results').innerHTML = `<div class="scan-results"><div class="clear-item">${Icons.stego} Extracted Message:</div><p class="mono" style="margin-top:1rem; color:var(--accent);">${new TextDecoder().decode(new Uint8Array(bytes))}</p></div>`;
+                        return;
+                    }
+                }
+                this.toast('No message found in image.');
+            }
+        },
+
+        async batchProcess(mode) {
+            if (this.currentFiles.length === 0) return this.toast('Upload files first.');
+            this.toast('Processing batch...');
+            try {
+                await ensureJsZip();
+                const zip = new JSZip();
+                let keys = [];
+                let blocked = 0;
+
+                for (let file of this.currentFiles) {
+                    const scan = await JSScanner.scan(file);
+                    if (!scan.clean) { blocked++; continue; }
+                    if (mode === 'zip') {
+                        zip.file(file.name, file);
+                    } else if (mode === 'encrypt') {
+                        const buffer = await file.arrayBuffer();
+                        const { key, keyString } = await CryptoEngine.generateKey();
+                        const { cipher, iv } = await CryptoEngine.encryptBuffer(key, buffer);
+                        const blob = new Blob([iv, new Uint8Array(cipher)], { type: "application/octet-stream" });
+                        zip.file(`${file.name}.aethel.enc`, blob);
+                        keys.push(`${file.name}: ${keyString}`);
+                    }
+                }
+
+                if (blocked > 0) this.toast(`${blocked} malicious files skipped.`);
+                if (zip.files.length === 0) return this.toast('No safe files to zip.');
+
+                const content = await zip.generateAsync({type:"blob"});
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(content);
+                a.download = mode === 'zip' ? 'clean_batch.zip' : 'encrypted_batch.zip';
+                a.click();
+
+                const resultsDiv = document.getElementById('media-results');
+                if (mode === 'encrypt' && keys.length > 0) {
+                    resultsDiv.innerHTML = `<div class="scan-results"><div class="clear-item">${Icons.lock} Batch encrypted & zipped!</div><p class="text-muted" style="margin: 1rem 0 0.5rem;">Save these keys:</p><div class="key-box">${keys.join('<br>')}</div></div>`;
+                } else {
+                    resultsDiv.innerHTML = `<div class="clear-item">${Icons.batch} Batch zipped successfully!</div>`;
+                }
+            } catch (e) { this.toast('Batch failed: ' + e.message); }
         },
         
         async convertDocToPdf() {
@@ -634,7 +1100,9 @@ window.AethelCore = (function() {
             { id: 'audio', icon: Icons.audio, label: 'Audio' },
             { id: 'video', icon: Icons.video, label: 'Video' },
             { id: 'docs', icon: Icons.doc, label: 'Docs' },
-            { id: 'vault', icon: Icons.lock, label: 'Vault' }
+            { id: 'vault', icon: Icons.lock, label: 'Vault' },
+            { id: 'notes', icon: Icons.notes, label: 'Notes' },
+            { id: 'batch', icon: Icons.batch, label: 'Batch' }
         ];
         return `
             <div class="dock">
@@ -673,24 +1141,14 @@ window.AethelCore = (function() {
         });
 
         document.addEventListener('visibilitychange', () => {
-            if (document.visibilityState === 'hidden') {
-                document.body.style.filter = 'blur(20px)';
-            } else {
-                document.body.style.filter = 'none';
-            }
+            if (document.visibilityState === 'hidden') document.body.style.filter = 'blur(20px)';
+            else document.body.style.filter = 'none';
         });
 
-        window.addEventListener('blur', () => {
-            document.body.style.filter = 'blur(20px)';
-        });
-        window.addEventListener('focus', () => {
-            document.body.style.filter = 'none';
-        });
+        window.addEventListener('blur', () => document.body.style.filter = 'blur(20px)');
+        window.addEventListener('focus', () => document.body.style.filter = 'none');
 
-        if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('./service-worker.js').catch(console.error);
-        }
-        
+        if ('serviceWorker' in navigator) navigator.serviceWorker.register('./service-worker.js').catch(console.error);
         UI.init();
     }
 
