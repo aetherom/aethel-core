@@ -15,4 +15,4 @@ jobs:
         uses: cloudflare/wrangler-action@v3.1.0
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN Will be Added Soon }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID Will be Added Soon  }}
+          accountId: ${{ secrets.898fd674a8b7d0b792dd1cbaba7f6456}}
