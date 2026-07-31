@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - main
- 
+
 jobs:
   test-and-deploy:
     runs-on: ubuntu-latest
@@ -23,9 +23,10 @@ jobs:
       - name: Run Unit Tests
         run: npm test
 
-      - name: Publish to Cloudflare Workers
-        if: success() # Only deploys if tests pass!
-        uses: cloudflare/wrangler-action@v3.1.0
+      - name: Deploy to Cloudflare
+        if: success()
+        uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy
