@@ -21,7 +21,7 @@ Deployment: Cloudflare Workers (Edge Network)
 🛡️ Features
 File & Media Processing: Malware scanning (SHA-256 signature matching & heuristic macro detection), EXIF/GPS metadata stripping, document conversion (PDF/Word/TXT).
 Cryptography: E2E File Encryption, Deniable Vaults, Key Splitting, Offline BIP39 Wallet Generation.
-Security & OSINT: Phishing URL Analysis, Dark Web Breach Checking (K-Anonymity SHA-1), TOTP 2FA Generator.
+Security & OSINT: Phishing URL Analysis, Dark Web Breach Checking (K-Anonymity SHA-1), TOTP 2FA Generator..
 
 📄 License
 MIT License - See LICENSE for details.
