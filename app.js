@@ -69,27 +69,17 @@ window.AethelCore = (function() {
 
     // --- Shamir's Secret Sharing (GF(256)) ---
     const GF256 = {
-        exp: new Uint8Array(512),
-        log: new Uint8Array(256),
+        exp: new Uint8Array(512), log: new Uint8Array(256),
         init() {
             let x = 1;
             for (let i = 0; i < 255; i++) {
-                this.exp[i] = x;
-                this.log[x] = i;
-                x <<= 1;
-                if (x & 0x100) x ^= 0x11d;
+                this.exp[i] = x; this.log[x] = i;
+                x <<= 1; if (x & 0x100) x ^= 0x11d;
             }
             for (let i = 255; i < 512; i++) this.exp[i] = this.exp[i - 255];
         },
-        mul(a, b) {
-            if (a === 0 || b === 0) return 0;
-            return this.exp[this.log[a] + this.log[b]];
-        },
-        div(a, b) {
-            if (a === 0) return 0;
-            if (b === 0) throw new Error("Divide by zero");
-            return this.exp[(this.log[a] - this.log[b] + 255) % 255];
-        }
+        mul(a, b) { return (a === 0 || b === 0) ? 0 : this.exp[this.log[a] + this.log[b]]; },
+        div(a, b) { if (a === 0) return 0; if (b === 0) throw new Error("Div by zero"); return this.exp[(this.log[a] - this.log[b] + 255) % 255]; }
     };
     GF256.init();
 
@@ -102,11 +92,8 @@ window.AethelCore = (function() {
                 coeffs[0] = byte;
                 crypto.getRandomValues(coeffs.subarray(1));
                 for (let i = 0; i < n; i++) {
-                    const x = i + 1;
-                    let y = 0;
-                    for (let j = k - 1; j >= 0; j--) {
-                        y = GF256.mul(y, x) ^ coeffs[j];
-                    }
+                    const x = i + 1; let y = 0;
+                    for (let j = k - 1; j >= 0; j--) y = GF256.mul(y, x) ^ coeffs[j];
                     shares[i].push(y);
                 }
             }
@@ -153,7 +140,8 @@ window.AethelCore = (function() {
         sss: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="12" r="3"></circle><path d="M9 12h6"></path></svg>`,
         hardware: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>`,
         breach: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>`,
-        crypto: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><path d="M9.5 8h4.5a2 2 0 0 1 0 4h-4.5a2 2 0 0 0 0 4h5"></path><line x1="12" y1="6" x2="12" y2="8"></line><line x1="12" y1="16" x2="12" y2="18"></line></svg>`
+        crypto: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><path d="M9.5 8h4.5a2 2 0 0 1 0 4h-4.5a2 2 0 0 0 0 4h5"></path><line x1="12" y1="6" x2="12" y2="8"></line><line x1="12" y1="16" x2="12" y2="18"></line></svg>`,
+        info: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>`
     };
 
     // --- Cryptographic Engines ---
@@ -178,25 +166,14 @@ window.AethelCore = (function() {
         async deriveKeyArgon2(password, saltStr) {
             await ensureArgon2();
             const salt = new TextEncoder().encode(saltStr);
-            const result = await argon2.hash({
-                pass: password,
-                salt: salt,
-                time: 3,
-                mem: 65536,
-                hashLen: 32,
-                parallelism: 1,
-                type: argon2.ArgonType.Argon2id
-            });
+            const result = await argon2.hash({ pass: password, salt: salt, time: 3, mem: 65536, hashLen: 32, parallelism: 1, type: argon2.ArgonType.Argon2id });
             const rawKey = Uint8Array.from(result.hashHex.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
             return await crypto.subtle.importKey("raw", rawKey, { name: "AES-GCM" }, false, ["encrypt", "decrypt"]);
         }
     };
 
     const JSScanner = {
-        knownMaliciousHashes: [
-            "275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f",
-            "131f95c51cc819465fa1797f6ccacf9d494aaaff46fa3eac73ae63ffbdfd8267"
-        ],
+        knownMaliciousHashes: [ "275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f", "131f95c51cc819465fa1797f6ccacf9d494aaaff46fa3eac73ae63ffbdfd8267" ],
         async getSHA256(file) {
             const buffer = await file.arrayBuffer();
             const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
@@ -205,43 +182,74 @@ window.AethelCore = (function() {
         },
         async scan(file) {
             const hash = await this.getSHA256(file);
-            if (this.knownMaliciousHashes.includes(hash)) {
-                return { clean: false, threat: "Known Malware Signature Detected (Hash Match)" };
-            }
+            if (this.knownMaliciousHashes.includes(hash)) return { clean: false, threat: "Known Malware Signature Detected (Hash Match)" };
             const textBuffer = await file.slice(0, 5242880).text();
             if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
-                if (textBuffer.includes('/JavaScript') || textBuffer.includes('/JS ') || textBuffer.includes('/EmbeddedFile')) {
-                    return { clean: false, threat: "Malicious Embedded Script or File in PDF" };
-                }
+                if (textBuffer.includes('/JavaScript') || textBuffer.includes('/JS ') || textBuffer.includes('/EmbeddedFile')) return { clean: false, threat: "Malicious Embedded Script or File in PDF" };
             }
             if (file.name.toLowerCase().endsWith('.docx') || file.name.toLowerCase().endsWith('.xlsx')) {
-                if (textBuffer.includes('vbaProject.bin') || textBuffer.includes('vbaData.xml')) {
-                    return { clean: false, threat: "VBA Macro Virus Detected" };
-                }
+                if (textBuffer.includes('vbaProject.bin') || textBuffer.includes('vbaData.xml')) return { clean: false, threat: "VBA Macro Virus Detected" };
             }
             return { clean: true };
         }
     };
 
+    // --- Tool Info Data ---
+    const ToolInfo = {
+        'links': 'Sanitizes tracking parameters (UTMs, fbclid), shortens URLs safely, and analyzes links for phishing indicators (IDN homograph attacks, suspicious TLDs) without sending your data to external servers.',
+        'images': 'Strips EXIF/GPS metadata from photos (protecting your location), converts formats, and allows End-to-End (E2E) encryption of the image payload entirely client-side.',
+        'audio': 'Processes audio files locally, allowing you to standardize formats or extract tracks without uploading them to cloud servers that might harvest metadata.',
+        'video': 'Processes video files locally. Prevents cloud platforms from scanning your personal media or extracting biometric data.',
+        'docs': 'Converts documents between formats (PDF, Word, TXT) and strips potentially malicious macros. Includes E2E encryption for secure sharing.',
+        'vault': 'Decrypts .aethel.enc files. Uses native WebCrypto (AES-GCM 256-bit). The decryption key never touches any server.',
+        'notes': 'Plausible Deniability Vault. Uses Argon2id (memory-hard) key derivation. Password 1 unlocks the Real Vault. Password 2 unlocks the Decoy Vault. An attacker cannot prove which vault you opened.',
+        'sss': 'Shamir\'s Secret Sharing. Mathematically splits a key into 3 shares using GF(256). Any 2 shares can reconstruct it. Single shares are useless. Perfect for distributing trust.',
+        'breach': 'Dark Web Password Checker. Uses K-Anonymity (SHA-1). Your password is NEVER sent to any server. Only the first 5 characters of its hash are queried against the Have I Been Pwned database.',
+        'crypto': 'BIP39 Paper Wallet Generator. Creates a secure 12-word mnemonic phrase and Ethereum address entirely offline using native WebCrypto entropy. No server calls are made.',
+        'verify': 'File Integrity Verifier. Confirms file authenticity by comparing SHA-256 hashes, ensuring files haven\'t been tampered with during transit.',
+        'totp': 'Time-based One-Time Password (2FA) Generator. Implements RFC 6238 entirely client-side. Your 2FA secrets never leave your browser.',
+        'stego': 'Steganography. Hides encrypted text messages inside the least significant bits (LSB) of PNG images. The carrier image looks normal, but extracting the LSBs reveals the hidden payload.',
+        'batch': 'Batch Zipper. Scans multiple files for malware, optionally E2E encrypts them, and packages them into a single secure .zip archive for download.'
+    };
+
     // --- UI Views ---
     const Views = {
         dashboard() {
-            const modules = [
-                { id: 'links', title: 'Link Tools', desc: 'Sanitize, Shorten, Reveal & Analyze', icon: Icons.link },
-                { id: 'images', title: 'Image Clean', desc: 'Convert, Strip EXIF & E2E Encrypt', icon: Icons.image },
-                { id: 'audio', title: 'Audio Studio', desc: 'Process & extract tracks', icon: Icons.audio },
-                { id: 'video', title: 'Video Studio', desc: 'Process & download media', icon: Icons.video },
-                { id: 'docs', title: 'Document Vault', desc: 'Convert to PDF/Word/TXT & Encrypt', icon: Icons.doc },
-                { id: 'vault', title: 'E2E Decrypter', desc: 'Decrypt .aethel encrypted files', icon: Icons.lock },
-                { id: 'notes', title: 'Deniable Notes', desc: 'Argon2id Vault with Decoy Password', icon: Icons.notes },
-                { id: 'sss', title: 'Key Splitter', desc: 'Shamir\'s Secret Sharing (2-of-3)', icon: Icons.sss },
-                { id: 'breach', title: 'Breach Checker', desc: 'Dark Web Password K-Anonymity Check', icon: Icons.breach },
-                { id: 'crypto', title: 'Crypto Wallet', desc: 'Generate Offline BIP39 Paper Wallet', icon: Icons.crypto },
-                { id: 'verify', title: 'Integrity Verifier', desc: 'Verify SHA-256 File Hashes', icon: Icons.verify },
-                { id: 'totp', title: 'TOTP Generator', desc: 'Client-side 2FA Codes', icon: Icons.totp },
-                { id: 'stego', title: 'Steganography', desc: 'Hide text inside images', icon: Icons.stego },
-                { id: 'batch', title: 'Batch Zipper', desc: 'Scan, Encrypt & Zip multiple files', icon: Icons.batch }
+            const sections = [
+                {
+                    title: "File & Media Processing",
+                    desc: "Local conversion, malware scanning, and metadata stripping.",
+                    tools: [
+                        { id: 'images', title: 'Image Clean', desc: 'Convert, Strip EXIF & E2E Encrypt', icon: Icons.image },
+                        { id: 'audio', title: 'Audio Studio', desc: 'Process & extract tracks', icon: Icons.audio },
+                        { id: 'video', title: 'Video Studio', desc: 'Process & download media', icon: Icons.video },
+                        { id: 'docs', title: 'Document Vault', desc: 'Convert to PDF/Word/TXT & Encrypt', icon: Icons.doc },
+                        { id: 'batch', title: 'Batch Zipper', desc: 'Scan, Encrypt & Zip multiple files', icon: Icons.batch }
+                    ]
+                },
+                {
+                    title: "Cryptography & Privacy",
+                    desc: "Zero-knowledge encryption, key splitting, and deniable storage.",
+                    tools: [
+                        { id: 'vault', title: 'E2E Decrypter', desc: 'Decrypt .aethel encrypted files', icon: Icons.lock },
+                        { id: 'notes', title: 'Deniable Notes', desc: 'Argon2id Vault with Decoy Password', icon: Icons.notes },
+                        { id: 'sss', title: 'Key Splitter', desc: 'Shamir\'s Secret Sharing (2-of-3)', icon: Icons.sss },
+                        { id: 'crypto', title: 'Crypto Wallet', desc: 'Generate Offline BIP39 Paper Wallet', icon: Icons.crypto }
+                    ]
+                },
+                {
+                    title: "Security & OSINT",
+                    desc: "Threat intelligence, link analysis, and steganography.",
+                    tools: [
+                        { id: 'links', title: 'Link Tools', desc: 'Sanitize, Shorten, Reveal & Analyze', icon: Icons.link },
+                        { id: 'breach', title: 'Breach Checker', desc: 'Dark Web Password K-Anonymity Check', icon: Icons.breach },
+                        { id: 'verify', title: 'Integrity Verifier', desc: 'Verify SHA-256 File Hashes', icon: Icons.verify },
+                        { id: 'totp', title: 'TOTP Generator', desc: 'Client-side 2FA Codes', icon: Icons.totp },
+                        { id: 'stego', title: 'Steganography', desc: 'Hide text inside images', icon: Icons.stego }
+                    ]
+                }
             ];
+
             return `
                 <nav class="top-nav">
                     <div class="nav-brand">${Icons.shield} AETHEL CORE</div>
@@ -250,14 +258,27 @@ window.AethelCore = (function() {
                 <div class="container">
                     <h1 style="font-size: 2rem; margin-bottom: 0.5rem;">Secure Workspace</h1>
                     <p class="text-muted" style="margin-bottom: 2rem;">Telegram-style E2E Encryption. All processing happens locally on your device.</p>
-                    <div class="grid-2">
-                        ${modules.map(m => `
-                            <div class="card nav-card" data-action="navigate" data-payload="${m.id}">
-                                <div style="width: 48px; height: 48px; background: var(--accent-dim); border-radius: 12px; display: flex; align-items: center; justify-content: center;">${m.icon}</div>
-                                <div><h3 style="margin-bottom: 0.25rem;">${m.title}</h3><p class="text-muted" style="margin:0;">${m.desc}</p></div>
+                    
+                    ${sections.map(section => `
+                        <div style="margin-bottom: 2.5rem;">
+                            <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem;">
+                                <h3 style="margin: 0; font-size: 1.2rem;">${section.title}</h3>
+                                <span data-action="show-info" data-payload="section-${section.title}" style="cursor: help; color: var(--text-muted);">${Icons.info}</span>
                             </div>
-                        `).join('')}
-                    </div>
+                            <p class="text-muted" style="margin-top: -0.5rem; margin-bottom: 1rem; font-size: 0.9rem;">${section.desc}</p>
+                            <div class="grid-2">
+                                ${section.tools.map(m => `
+                                    <div class="card nav-card" data-action="navigate" data-payload="${m.id}">
+                                        <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+                                            <div style="width: 48px; height: 48px; background: var(--accent-dim); border-radius: 12px; display: flex; align-items: center; justify-content: center;">${m.icon}</div>
+                                            <span data-action="show-info" data-payload="${m.id}" style="cursor: help; color: var(--text-muted); margin-top: 4px;">${Icons.info}</span>
+                                        </div>
+                                        <div><h3 style="margin-bottom: 0.25rem;">${m.title}</h3><p class="text-muted" style="margin:0;">${m.desc}</p></div>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    `).join('')}
                 </div>
             `;
         },
@@ -533,7 +554,7 @@ window.AethelCore = (function() {
                         <button class="btn btn-danger btn-sm" data-action="clear-cache">Clear Cache & Reload</button>
                     </div>
                     <div class="card">
-                        <h3>Legal</h3>
+                        <h3>Legal & Liability</h3>
                         <div id="legal-container" style="margin-top: 1rem;"></div>
                     </div>
                 </div>
@@ -562,17 +583,20 @@ window.AethelCore = (function() {
             if (tab) {
                 document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
                 tab.classList.add('active');
-                if (tab.dataset.tab.startsWith('stego-')) {
-                    this.updateStegoTab(tab.dataset.tab);
-                } else {
-                    this.updateLinkTab(tab.dataset.tab);
-                }
+                if (tab.dataset.tab.startsWith('stego-')) this.updateStegoTab(tab.dataset.tab);
+                else this.updateLinkTab(tab.dataset.tab);
                 return;
             }
 
             if (!target) return;
             const action = target.dataset.action;
             const payload = target.dataset.payload;
+
+            if (action === 'show-info') {
+                e.stopPropagation(); // Prevent navigation when clicking info icon
+                this.showInfoModal(payload);
+                return;
+            }
 
             if (action === 'navigate') { window.location.hash = payload; this.render(); }
             else if (action === 'process-url') { this.processUrl(target.dataset.mode); }
@@ -602,6 +626,35 @@ window.AethelCore = (function() {
             else if (action === 'copy-url') { this.copyWithExpiry(document.querySelector('#url-results .mono').innerText); }
             else if (action === 'copy-key') { this.copyWithExpiry(document.querySelector('.key-box').innerText); }
             else if (action === 'toggle-webauthn') { this.toggleWebAuthn(); }
+        },
+
+        showInfoModal(toolId) {
+            let title = "Information";
+            let text = "No info available.";
+            
+            if (toolId.startsWith('section-')) {
+                title = toolId.replace('section-', '');
+                if (title === "File & Media Processing") text = "Tools for converting, cleaning, and securely packaging files without uploading them to remote servers.";
+                if (title === "Cryptography & Privacy") text = "Advanced cryptographic tools ensuring zero-knowledge privacy, plausible deniability, and secure key management.";
+                if (title === "Security & OSINT") text = "Utilities for threat detection, link analysis, and covert communication via steganography.";
+            } else {
+                title = toolId.charAt(0).toUpperCase() + toolId.slice(1).replace(/([A-Z])/g, ' $1');
+                text = ToolInfo[toolId] || text;
+            }
+
+            const modal = document.createElement('div');
+            modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.8);backdrop-filter:blur(10px);z-index:10000;display:flex;align-items:center;justify-content:center;padding:1rem;';
+            modal.innerHTML = `
+                <div class="card" style="max-width:500px;position:relative;">
+                    <button class="btn-outline btn-sm" style="position:absolute;top:1rem;right:1rem;pointer-events:auto;" data-action="close-modal">Close</button>
+                    <h3 style="margin-bottom:1rem; display:flex; align-items:center; gap:0.5rem;">${Icons.info} ${title}</h3>
+                    <p class="text-muted" style="line-height:1.6;">${text}</p>
+                </div>
+            `;
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal || e.target.closest('[data-action="close-modal"]')) modal.remove();
+            });
+            document.body.appendChild(modal);
         },
         
         render() {
@@ -1272,7 +1325,7 @@ window.AethelCore = (function() {
                 const updateCode = async () => {
                     try {
                         const key = await crypto.subtle.importKey("raw", base32ToUint8Array(secret), {name: "HMAC", hash: "SHA-1"}, false, ["sign"]);
-                        const epoch = Math.floor(Date.now() / 1000);
+                        const epoch = Math.floor(Date.now()1 / 1000);
                         const counter = Math.floor(epoch / 30);
                         const buffer = new ArrayBuffer(8);
                         const view = new DataView(buffer);
@@ -1442,50 +1495,131 @@ window.AethelCore = (function() {
         document.body.appendChild(dockEl.firstElementChild);
     };
 
+    // --- Ad Gate Logic ---
+    function showAdGate(callback) {
+        const gate = document.createElement('div');
+        gate.id = 'ad-gate';
+        gate.style.cssText = 'position:fixed;inset:0;background:#0B0F19;z-index:9999;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;padding:1rem;';
+        gate.innerHTML = `
+            <div style="max-width:450px;width:100%;">
+                <div style="color: var(--accent); margin-bottom: 1.5rem; display:flex; justify-content:center;">${Icons.shield}</div>
+                <h2 style="margin-bottom: 0.5rem;">Aethel Core</h2>
+                <p class="text-muted" style="margin-bottom: 2rem;">Sponsored message keeps this tool free.</p>
+                
+                <!-- AD PLACEMENT SLOT -->
+                <div style="background:var(--bg-card);border:1px dashed var(--border);padding:2rem;border-radius:12px;margin-bottom:2rem;">
+                    <p style="color:var(--text-muted);font-size:0.8rem;margin-bottom:0.5rem;">ADVERTISEMENT</p>
+                    <!-- Replace this with your actual Ad Code (e.g., Google AdSense) -->
+                    <div style="color:var(--accent);">Your Ad Here (300x250)</div>
+                </div>
+
+                <button class="btn" id="skip-ad-btn" disabled style="width:100%;opacity:0.5;">Continue to App (5s)</button>
+            </div>
+        `;
+        document.body.appendChild(gate);
+        
+        let timeLeft = 5;
+        const timer = setInterval(() => {
+            timeLeft--;
+            if (timeLeft <= 0) {
+                clearInterval(timer);
+                const btn = document.getElementById('skip-ad-btn');
+                btn.disabled = false;
+                btn.style.opacity = '1';
+                btn.innerText = 'Continue to App';
+                btn.onclick = () => {
+                    gate.remove();
+                    callback();
+                };
+            } else {
+                document.getElementById('skip-ad-btn').innerText = `Continue to App (${timeLeft}s)`;
+            }
+        }, 1000);
+    }
+
+    // --- Onboarding & Legal Trail ---
+    function showOnboarding(callback) {
+        if (localStorage.getItem('aethel_onboarded') === 'true') {
+            callback();
+            return;
+        }
+
+        const ob = document.createElement('div');
+        ob.id = 'onboarding';
+        ob.style.cssText = 'position:fixed;inset:0;background:#0B0F19;z-index:9998;display:flex;align-items:center;justify-content:center;padding:1rem;overflow-y:auto;';
+        ob.innerHTML = `
+            <div class="card" style="max-width:600px;margin:2rem 0;">
+                <div style="text-align:center; margin-bottom:1rem; color:var(--accent);">${Icons.shield}</div>
+                <h2 style="text-align:center; margin-bottom:0.5rem;">Why Aethel Core?</h2>
+                <p class="text-muted" style="text-align:center; margin-bottom:2rem;">Your data is yours. We exist to keep it that way.</p>
+                
+                <div style="margin-bottom:1.5rem;">
+                    <h4 style="color:var(--accent); margin-bottom:0.5rem;">1. Zero-Knowledge Architecture</h4>
+                    <p class="text-muted" style="font-size:0.9rem;">Unlike cloud tools, every function (encryption, conversion, scanning) executes directly in your browser thread. Your files never touch a server.</p>
+                </div>
+
+                <div style="margin-bottom:1.5rem;">
+                    <h4 style="color:var(--accent); margin-bottom:0.5rem;">2. Military-Grade Cryptography</h4>
+                    <p class="text-muted" style="font-size:0.9rem;">We use native WebCrypto (AES-GCM 256-bit), Argon2id memory-hard key derivation, and Shamir's Secret Sharing to ensure mathematically provable security.</p>
+                </div>
+
+                <div style="margin-bottom:2rem;">
+                    <h4 style="color:var(--accent); margin-bottom:0.5rem;">3. Protection from Surveillance</h4>
+                    <p class="text-muted" style="font-size:0.9rem;">Strip GPS metadata from photos, sanitize tracking links, and hide data inside images using steganography to evade corporate and state surveillance.</p>
+                </div>
+
+                <div style="border:1px solid var(--danger); background:rgba(255,77,77,0.05); padding:1rem; border-radius:8px; margin-bottom:2rem;">
+                    <h4 style="color:var(--danger); margin-bottom:0.5rem;">Legal Disclaimer & Liability Waiver</h4>
+                    <p style="font-size:0.8rem; color:var(--text-muted); line-height:1.5;">
+                        <strong>UK & GLOBAL COMPLIANCE:</strong> This software is provided "as is", without warranty of any kind, express or implied. The authors and copyright holders are <strong>not liable for any claim, damages, or other liability</strong>, whether in an action of contract, tort or otherwise, arising from, out of, or in connection with the software or the use or other dealings in the software.
+                        <br><br>
+                        <strong>NO FINANCIAL ADVICE:</strong> The Crypto Wallet generator is for educational purposes only. Do not use generated wallets for large funds.
+                        <br><br>
+                        <strong>RESPONSIBLE USE:</strong> By proceeding, you agree that you are the rightful owner of any data processed and will not use these tools for illegal activities. This tool does not log your data, and therefore cannot assist in data recovery if keys are lost.
+                    </p>
+                </div>
+
+                <button class="btn" id="agree-btn" style="width:100%;">I Agree & Enter Workspace</button>
+            </div>
+        `;
+        document.body.appendChild(ob);
+
+        document.getElementById('agree-btn').onclick = () => {
+            localStorage.setItem('aethel_onboarded', 'true');
+            ob.remove();
+            callback();
+        };
+    }
+
     async function init() {
         if (window.location.hash) {
             history.replaceState(null, '', window.location.pathname + window.location.search);
         }
 
-        // WebAuthn Gatekeeper
-        if (localStorage.getItem('aethel_webauthn_enabled') === 'true') {
-            document.body.innerHTML = `<div style="display:flex; flex-direction:column; justify-content:center; align-items:center; height:100vh; text-align:center; padding:2rem;">
-                <div style="color: var(--accent); margin-bottom: 1rem;">${Icons.shield}</div>
-                <h2>Hardware Key Required</h2>
-                <p class="text-muted" style="margin: 1rem 0;">Please verify your identity to unlock Aethel Core.</p>
-                <button class="btn" id="webauthn-unlock-btn">Unlock App</button>
-            </div>`;
-            document.getElementById('webauthn-unlock-btn').addEventListener('click', async () => {
-                const success = await UI.verifyWebAuthn();
-                if (success) {
-                    document.body.innerHTML = '<div id="app-root"></div><div id="toast-container"></div>';
-                    UI.init();
+        // Flow: Ad Gate -> Onboarding -> WebAuthn (if enabled) -> Main App
+        showAdGate(() => {
+            showOnboarding(() => {
+                if (localStorage.getItem('aethel_webauthn_enabled') === 'true') {
+                    document.body.innerHTML = `<div style="display:flex; flex-direction:column; justify-content:center; align-items:center; height:100vh; text-align:center; padding:2rem;">
+                        <div style="color: var(--accent); margin-bottom: 1rem;">${Icons.shield}</div>
+                        <h2>Hardware Key Required</h2>
+                        <p class="text-muted" style="margin: 1rem 0;">Please verify your identity to unlock Aethel Core.</p>
+                        <button class="btn" id="webauthn-unlock-btn">Unlock App</button>
+                    </div>`;
+                    document.getElementById('webauthn-unlock-btn').addEventListener('click', async () => {
+                        const success = await UI.verifyWebAuthn();
+                        if (success) {
+                            document.body.innerHTML = '<div id="app-root"></div><div id="toast-container"></div>';
+                            UI.init();
+                        } else {
+                            alert('Verification failed.');
+                        }
+                    });
                 } else {
-                    alert('Verification failed.');
+                    UI.init();
                 }
             });
-            return;
-        }
-
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'PrintScreen' || (e.ctrlKey && (e.key === 'p' || e.key === 's'))) {
-                e.preventDefault();
-                if (navigator.clipboard) navigator.clipboard.writeText('');
-                if (UI.toast) UI.toast('Screenshots and printing are disabled for security.');
-                return false;
-            }
         });
-
-        document.addEventListener('visibilitychange', () => {
-            if (document.visibilityState === 'hidden') document.body.style.filter = 'blur(20px)';
-            else document.body.style.filter = 'none';
-        });
-
-        window.addEventListener('blur', () => document.body.style.filter = 'blur(20px)');
-        window.addEventListener('focus', () => document.body.style.filter = 'none');
-
-        if ('serviceWorker' in navigator) navigator.serviceWorker.register('./service-worker.js').catch(console.error);
-        UI.init();
     }
 
     return { init };
