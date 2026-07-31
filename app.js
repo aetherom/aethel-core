@@ -805,7 +805,7 @@ window.AethelCore = (function() {
             }
         },
         
-        async processUrl(mode) {
+                async processUrl(mode) {
             const input = document.getElementById('url-input').value;
             const resultsDiv = document.getElementById('url-results');
             resultsDiv.innerHTML = `<div class="progress-bar"><div class="progress-fill" style="width: 50%"></div></div><p class="text-muted">Processing...</p>`;
@@ -815,13 +815,16 @@ window.AethelCore = (function() {
                     ['utm_source', 'utm_medium', 'gclid', 'fbclid'].forEach(p => url.searchParams.delete(p));
                     this.showUrlResult("Sanitized URL", url.toString(), true);
                 } else if (mode === 'shorten') {
-                    const proxyUrl = `https://corsproxy.io/?url=${encodeURIComponent(`https://is.gd/create.php?format=simple&url=${encodeURIComponent(input)}`)}`;
+                    // FIX: Switched to allorigins.win which is completely free for production
+                    const targetUrl = `https://is.gd/create.php?format=simple&url=${encodeURIComponent(input)}`;
+                    const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`;
                     const res = await fetch(proxyUrl);
                     const shortUrl = await res.text();
                     if(shortUrl.startsWith('Error') || shortUrl.includes('html')) throw new Error("Could not shorten URL.");
                     this.showUrlResult("Shortened URL", shortUrl.trim(), true);
                 } else if (mode === 'reveal') {
-                    const proxyUrl = `https://corsproxy.io/?url=${encodeURIComponent(`https://api.allorigins.win/get?url=${encodeURIComponent(input)}`)}`;
+                    // FIX: allorigins.win /get endpoint returns JSON with the final unshortened URL
+                    const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(input)}`;
                     const res = await fetch(proxyUrl);
                     const data = await res.json();
                     if(data.status.url) this.showUrlResult("Final Destination", data.status.url, true);
@@ -850,7 +853,6 @@ window.AethelCore = (function() {
                 resultsDiv.innerHTML = `<div class="threat-item">${Icons.scan} Error: ${err.message}</div>`;
             }
         },
-
         showUrlResult(label, url, allowCopy = false) {
             document.getElementById('url-results').innerHTML = `
                 <div class="scan-results">
