@@ -1,0 +1,3 @@
+name = "aethel-core"
+compatibility_date = "2023-10-25"
+main = "./index.html"
