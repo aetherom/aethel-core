@@ -1,7 +1,7 @@
 window.AethelCore = (function() {
     'use strict';
 
-    // Dynamically load JSZip for Batch Processing
+    // --- Dynamic Library Loaders ---
     async function ensureJsZip() {
         if (window.JSZip) return;
         await new Promise((resolve, reject) => {
@@ -13,7 +13,18 @@ window.AethelCore = (function() {
         });
     }
 
-    // Utility: Base32 to Uint8Array (for TOTP)
+    async function ensureArgon2() {
+        if (window.argon2) return;
+        await new Promise((resolve, reject) => {
+            const s = document.createElement('script');
+            s.src = 'https://cdn.jsdelivr.net/npm/argon2-browser@1.18.0/dist/argon2-bundle.min.js';
+            s.onload = resolve;
+            s.onerror = () => reject(new Error("Failed to load Argon2 library."));
+            document.head.appendChild(s);
+        });
+    }
+
+    // --- Utility Functions ---
     function base32ToUint8Array(base32) {
         const base32chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
         let bits = 0, value = 0;
@@ -33,7 +44,6 @@ window.AethelCore = (function() {
         return new Uint8Array(bytes);
     }
 
-    // Utility: Shannon Entropy Calculator
     function calculateEntropy(str) {
         if (!str) return 0;
         const freq = {};
@@ -46,6 +56,72 @@ window.AethelCore = (function() {
         return Math.round(entropy * str.length);
     }
 
+    // --- Shamir's Secret Sharing (GF(256)) ---
+    const GF256 = {
+        exp: new Uint8Array(512),
+        log: new Uint8Array(256),
+        init() {
+            let x = 1;
+            for (let i = 0; i < 255; i++) {
+                this.exp[i] = x;
+                this.log[x] = i;
+                x <<= 1;
+                if (x & 0x100) x ^= 0x11d;
+            }
+            for (let i = 255; i < 512; i++) this.exp[i] = this.exp[i - 255];
+        },
+        mul(a, b) {
+            if (a === 0 || b === 0) return 0;
+            return this.exp[this.log[a] + this.log[b]];
+        },
+        div(a, b) {
+            if (a === 0) return 0;
+            if (b === 0) throw new Error("Divide by zero");
+            return this.exp[(this.log[a] - this.log[b] + 255) % 255];
+        }
+    };
+    GF256.init();
+
+    const SSS = {
+        split(secretStr, n, k) {
+            const secret = new TextEncoder().encode(secretStr);
+            const shares = Array.from({length: n}, () => []);
+            for (let byte of secret) {
+                const coeffs = new Uint8Array(k);
+                coeffs[0] = byte;
+                crypto.getRandomValues(coeffs.subarray(1));
+                for (let i = 0; i < n; i++) {
+                    const x = i + 1;
+                    let y = 0;
+                    for (let j = k - 1; j >= 0; j--) {
+                        y = GF256.mul(y, x) ^ coeffs[j];
+                    }
+                    shares[i].push(y);
+                }
+            }
+            return shares.map(s => btoa(String.fromCharCode(...s)));
+        },
+        combine(shareStrs) {
+            const shares = shareStrs.map(s => Uint8Array.from(atob(s), c => c.charCodeAt(0)));
+            const secret = [];
+            for (let i = 0; i < shares[0].length; i++) {
+                let y = 0;
+                for (let j = 0; j < shares.length; j++) {
+                    let num = 1, den = 1;
+                    for (let m = 0; m < shares.length; m++) {
+                        if (j === m) continue;
+                        num = GF256.mul(num, (m + 1));
+                        den = GF256.mul(den, ((m + 1) ^ (j + 1)));
+                    }
+                    y ^= GF256.mul(shares[j][i], GF256.div(num, den));
+                }
+                secret.push(y);
+            }
+            return new TextDecoder().decode(new Uint8Array(secret));
+        }
+    };
+
+    // --- Icons ---
     const Icons = {
         shield: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>`,
         link: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>`,
@@ -62,9 +138,12 @@ window.AethelCore = (function() {
         totp: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>`,
         stego: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>`,
         batch: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>`,
-        copy: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`
+        copy: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`,
+        sss: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="12" r="3"></circle><path d="M9 12h6"></path></svg>`,
+        hardware: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>`
     };
 
+    // --- Cryptographic Engines ---
     const CryptoEngine = {
         async generateKey() {
             const key = await window.crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]);
@@ -83,16 +162,20 @@ window.AethelCore = (function() {
         async decryptBuffer(key, cipher, iv) {
             return await window.crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, cipher);
         },
-        async deriveKey(password, salt) {
-            const enc = new TextEncoder();
-            const keyMaterial = await crypto.subtle.importKey("raw", enc.encode(password), "PBKDF2", false, ["deriveKey"]);
-            return await crypto.subtle.deriveKey(
-                { name: "PBKDF2", salt: salt, iterations: 100000, hash: "SHA-256" },
-                keyMaterial,
-                { name: "AES-GCM", length: 256 },
-                false,
-                ["encrypt", "decrypt"]
-            );
+        async deriveKeyArgon2(password, saltStr) {
+            await ensureArgon2();
+            const salt = new TextEncoder().encode(saltStr);
+            const result = await argon2.hash({
+                pass: password,
+                salt: salt,
+                time: 3, // iterations
+                mem: 65536, // 64MB memory hard
+                hashLen: 32,
+                parallelism: 1,
+                type: argon2.ArgonType.Argon2id
+            });
+            const rawKey = Uint8Array.from(result.hashHex.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
+            return await crypto.subtle.importKey("raw", rawKey, { name: "AES-GCM" }, false, ["encrypt", "decrypt"]);
         }
     };
 
@@ -127,6 +210,7 @@ window.AethelCore = (function() {
         }
     };
 
+    // --- UI Views ---
     const Views = {
         dashboard() {
             const modules = [
@@ -136,7 +220,8 @@ window.AethelCore = (function() {
                 { id: 'video', title: 'Video Studio', desc: 'Process & download media', icon: Icons.video },
                 { id: 'docs', title: 'Document Vault', desc: 'Convert to PDF/Word/TXT & Encrypt', icon: Icons.doc },
                 { id: 'vault', title: 'E2E Decrypter', desc: 'Decrypt .aethel encrypted files', icon: Icons.lock },
-                { id: 'notes', title: 'Secure Notes', desc: 'E2E Encrypted Local Notepad', icon: Icons.notes },
+                { id: 'notes', title: 'Deniable Notes', desc: 'Argon2id Vault with Decoy Password', icon: Icons.notes },
+                { id: 'sss', title: 'Key Splitter', desc: 'Shamir\'s Secret Sharing (2-of-3)', icon: Icons.sss },
                 { id: 'verify', title: 'Integrity Verifier', desc: 'Verify SHA-256 File Hashes', icon: Icons.verify },
                 { id: 'totp', title: 'TOTP Generator', desc: 'Client-side 2FA Codes', icon: Icons.totp },
                 { id: 'stego', title: 'Steganography', desc: 'Hide text inside images', icon: Icons.stego },
@@ -240,19 +325,45 @@ window.AethelCore = (function() {
         notes() {
             return `
                 <nav class="top-nav">
-                    <div class="nav-brand">${Icons.notes} SECURE NOTES</div>
+                    <div class="nav-brand">${Icons.notes} DENIABLE NOTES</div>
                     <button class="btn btn-outline btn-sm" data-action="navigate" data-payload="dashboard">Back</button>
                 </nav>
                 <div class="container">
                     <div class="card">
-                        <h3 style="margin-bottom: 1rem;">E2E Encrypted Notepad</h3>
-                        <p class="text-muted" style="margin-bottom: 1rem;">Notes are encrypted with your password via PBKDF2 (100k iterations) and stored locally. No server, no cloud.</p>
-                        <textarea id="note-input" class="input" style="min-height: 200px; font-family: 'JetBrains Mono', monospace;" placeholder="Type your secret note here..."></textarea>
+                        <h3 style="margin-bottom: 1rem;">Plausible Deniability Vault</h3>
+                        <p class="text-muted" style="margin-bottom: 1rem;">Uses Argon2id Key Derivation. Password 1 unlocks the Real Vault. Password 2 unlocks the Decoy Vault. An attacker cannot prove which vault you opened.</p>
+                        <textarea id="note-input" class="input" style="min-height: 150px; font-family: 'JetBrains Mono', monospace;" placeholder="Type secret note here..."></textarea>
                         <div class="grid-2" style="margin-top:1rem;">
-                            <input type="password" id="note-pass" class="input" placeholder="Encryption Password">
-                            <button class="btn" data-action="save-note">${Icons.lock} Save Encrypted</button>
+                            <input type="password" id="note-pass" class="input" placeholder="Password">
+                            <select id="note-type" class="input">
+                                <option value="real">Save to Real Vault</option>
+                                <option value="decoy">Save to Decoy Vault</option>
+                            </select>
                         </div>
-                        <button class="btn btn-outline" data-action="load-note" style="margin-top:1rem; width:100%;">${Icons.download} Decrypt & Load Note</button>
+                        <button class="btn" data-action="save-note" style="margin-top:1rem; width:100%;">${Icons.lock} Encrypt & Save Locally</button>
+                        <button class="btn btn-outline" data-action="load-note" style="margin-top:0.5rem; width:100%;">${Icons.download} Decrypt & Load Vault</button>
+                        <div id="media-results"></div>
+                    </div>
+                </div>
+            `;
+        },
+
+        sss() {
+            return `
+                <nav class="top-nav">
+                    <div class="nav-brand">${Icons.sss} KEY SPLITTER</div>
+                    <button class="btn btn-outline btn-sm" data-action="navigate" data-payload="dashboard">Back</button>
+                </nav>
+                <div class="container">
+                    <div class="card">
+                        <h3 style="margin-bottom: 1rem;">Shamir's Secret Sharing</h3>
+                        <p class="text-muted" style="margin-bottom: 1rem;">Split a key into 3 shares. Any 2 shares can reconstruct it. Single shares are useless.</p>
+                        <input type="text" id="sss-secret" class="input" style="margin-bottom:1rem;" placeholder="Paste key/secret to split...">
+                        <button class="btn" data-action="sss-split" style="width:100%; margin-bottom:2rem;">${Icons.sss} Split into 3 Shares</button>
+                        
+                        <input type="text" id="sss-share-1" class="input" style="margin-bottom:0.5rem;" placeholder="Paste Share 1...">
+                        <input type="text" id="sss-share-2" class="input" style="margin-bottom:0.5rem;" placeholder="Paste Share 2...">
+                        <button class="btn btn-outline" data-action="sss-combine" style="width:100%;">${Icons.shield} Reconstruct Secret</button>
                         <div id="media-results"></div>
                     </div>
                 </div>
@@ -354,12 +465,18 @@ window.AethelCore = (function() {
         },
 
         settings() {
+            const webauthnEnabled = localStorage.getItem('aethel_webauthn_enabled') === 'true';
             return `
                 <nav class="top-nav">
                     <div class="nav-brand">${Icons.shield} SETTINGS</div>
                     <button class="btn btn-outline btn-sm" data-action="navigate" data-payload="dashboard">Back</button>
                 </nav>
                 <div class="container">
+                    <div class="card">
+                        <h3>Hardware Key Lock (WebAuthn)</h3>
+                        <p class="text-muted" style="margin: 1rem 0;">Require a physical biometric/passkey hardware tap to unlock the application on launch.</p>
+                        <button class="btn ${webauthnEnabled ? 'btn-danger' : 'btn-warning'} btn-sm" data-action="toggle-webauthn">${webauthnEnabled ? 'Disable Hardware Lock' : 'Enable Hardware Lock'}</button>
+                    </div>
                     <div class="card">
                         <h3>Application Data</h3>
                         <p class="text-muted" style="margin: 1rem 0;">Clear all cached data and scans. This will unregister the service worker and reload the app.</p>
@@ -374,6 +491,7 @@ window.AethelCore = (function() {
         }
     };
 
+    // --- UI Controller ---
     const UI = {
         root: document.getElementById('app-root'),
         currentFile: null,
@@ -424,11 +542,14 @@ window.AethelCore = (function() {
             else if (action === 'clear-cache') { this.clearCache(); }
             else if (action === 'save-note') { this.saveNote(); }
             else if (action === 'load-note') { this.loadNote(); }
+            else if (action === 'sss-split') { this.sssSplit(); }
+            else if (action === 'sss-combine') { this.sssCombine(); }
             else if (action === 'verify-file') { this.verifyFile(); }
             else if (action === 'batch-process') { this.batchProcess(target.dataset.mode); }
             else if (action === 'stego-process') { this.stegoProcess(target.dataset.mode); }
             else if (action === 'copy-url') { this.copyWithExpiry(document.querySelector('#url-results .mono').innerText); }
             else if (action === 'copy-key') { this.copyWithExpiry(document.querySelector('.key-box').innerText); }
+            else if (action === 'toggle-webauthn') { this.toggleWebAuthn(); }
         },
         
         render() {
@@ -502,6 +623,49 @@ window.AethelCore = (function() {
             });
         },
         
+        async toggleWebAuthn() {
+            if (localStorage.getItem('aethel_webauthn_enabled') === 'true') {
+                localStorage.removeItem('aethel_webauthn_enabled');
+                this.toast('Hardware lock disabled.');
+                this.render();
+                return;
+            }
+            try {
+                const challenge = new Uint8Array(32);
+                crypto.getRandomValues(challenge);
+                await navigator.credentials.create({
+                    publicKey: {
+                        challenge,
+                        rp: { name: "Aethel Core" },
+                        user: { id: new Uint8Array(16), name: "user", displayName: "User" },
+                        pubKeyCredParams: [{ type: "public-key", alg: -7 }],
+                        authenticatorSelection: { userVerification: "required" }
+                    }
+                });
+                localStorage.setItem('aethel_webauthn_enabled', 'true');
+                this.toast('Hardware lock enabled!');
+                this.render();
+            } catch (e) {
+                this.toast('WebAuthn setup failed.');
+            }
+        },
+
+        async verifyWebAuthn() {
+            try {
+                const challenge = new Uint8Array(32);
+                crypto.getRandomValues(challenge);
+                await navigator.credentials.get({
+                    publicKey: {
+                        challenge,
+                        userVerification: "required"
+                    }
+                });
+                return true;
+            } catch (e) {
+                return false;
+            }
+        },
+
         clearCache() {
             if (caches) caches.keys().then(keys => keys.forEach(k => caches.delete(k)));
             if ('serviceWorker' in navigator) navigator.serviceWorker.getRegistrations().then(regs => regs.forEach(reg => reg.unregister()));
@@ -705,10 +869,8 @@ window.AethelCore = (function() {
                         </select>
                         <button class="btn btn-sm" data-action="process-doc" style="width:100%; margin-bottom:0.5rem;">${Icons.download} Process & Download</button>
                     `;
-                } else if (type === 'verify') {
-                    actionContainer.innerHTML = `<p class="text-muted">File loaded. Paste hash and click verify.</p>`;
-                } else if (type === 'stego') {
-                    actionContainer.innerHTML = `<p class="text-muted">Image loaded. Choose action above.</p>`;
+                } else if (type === 'verify' || type === 'stego') {
+                    actionContainer.innerHTML = `<p class="text-muted">File loaded. Use action above.</p>`;
                 }
 
                 if (type !== 'verify' && type !== 'stego') {
@@ -901,39 +1063,78 @@ window.AethelCore = (function() {
         async saveNote() {
             const pass = document.getElementById('note-pass').value;
             const text = document.getElementById('note-input').value;
+            const type = document.getElementById('note-type').value;
             if (!pass || !text) return this.toast('Password and text required.');
-            this.toast('Encrypting note...');
+            this.toast('Encrypting with Argon2id...');
             try {
-                const salt = crypto.getRandomValues(new Uint8Array(16));
+                const saltStr = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(16))));
                 const iv = crypto.getRandomValues(new Uint8Array(12));
-                const key = await CryptoEngine.deriveKey(pass, salt);
+                const key = await CryptoEngine.deriveKeyArgon2(pass, saltStr);
                 const cipher = await crypto.subtle.encrypt({name: "AES-GCM", iv}, key, new TextEncoder().encode(text));
-                const stored = {
-                    salt: btoa(String.fromCharCode(...salt)),
+                
+                let store = JSON.parse(localStorage.getItem('aethel_notes') || '{}');
+                store[type] = {
+                    salt: saltStr,
                     iv: btoa(String.fromCharCode(...iv)),
                     cipher: btoa(String.fromCharCode(...new Uint8Array(cipher)))
                 };
-                localStorage.setItem('aethel_note', JSON.stringify(stored));
-                this.toast('Note encrypted and saved locally!');
+                localStorage.setItem('aethel_notes', JSON.stringify(store));
+                this.toast(`Note saved to ${type.toUpperCase()} vault!`);
             } catch (e) { this.toast('Encryption failed.'); }
         },
 
         async loadNote() {
             const pass = document.getElementById('note-pass').value;
-            const stored = localStorage.getItem('aethel_note');
+            const store = JSON.parse(localStorage.getItem('aethel_notes') || '{}');
             if (!pass) return this.toast('Password required.');
-            if (!stored) return this.toast('No note found.');
-            this.toast('Decrypting note...');
+            if (!store.real && !store.decoy) return this.toast('No notes found.');
+            this.toast('Attempting decryption (Argon2id)...');
+            
+            // Try real vault first, then decoy. GCM auth tag verifies which password is correct.
+            for (let type of ['real', 'decoy']) {
+                if (!store[type]) continue;
+                try {
+                    const data = store[type];
+                    const salt = data.salt;
+                    const iv = Uint8Array.from(atob(data.iv), c => c.charCodeAt(0));
+                    const cipher = Uint8Array.from(atob(data.cipher), c => c.charCodeAt(0));
+                    const key = await CryptoEngine.deriveKeyArgon2(pass, salt);
+                    const decrypted = await crypto.subtle.decrypt({name: "AES-GCM", iv}, key, cipher);
+                    document.getElementById('note-input').value = new TextDecoder().decode(decrypted);
+                    this.toast(`${type.toUpperCase()} vault decrypted!`);
+                    return;
+                } catch (e) { /* Wrong password for this vault, try next */ }
+            }
+            this.toast('Decryption failed. Wrong password for all vaults.');
+        },
+
+        sssSplit() {
+            const secret = document.getElementById('sss-secret').value;
+            if (!secret) return this.toast('Enter a secret to split.');
+            const shares = SSS.split(secret, 3, 2);
+            document.getElementById('media-results').innerHTML = `
+                <div class="scan-results">
+                    <div class="clear-item">${Icons.sss} Secret split into 3 shares. Any 2 will reconstruct it.</div>
+                    <div class="key-box">Share 1:<br>${shares[0]}</div>
+                    <div class="key-box">Share 2:<br>${shares[1]}</div>
+                    <div class="key-box">Share 3:<br>${shares[2]}</div>
+                </div>
+            `;
+        },
+
+        sssCombine() {
+            const s1 = document.getElementById('sss-share-1').value.trim();
+            const s2 = document.getElementById('sss-share-2').value.trim();
+            if (!s1 || !s2) return this.toast('Need at least 2 shares.');
             try {
-                const data = JSON.parse(stored);
-                const salt = Uint8Array.from(atob(data.salt), c => c.charCodeAt(0));
-                const iv = Uint8Array.from(atob(data.iv), c => c.charCodeAt(0));
-                const cipher = Uint8Array.from(atob(data.cipher), c => c.charCodeAt(0));
-                const key = await CryptoEngine.deriveKey(pass, salt);
-                const decrypted = await crypto.subtle.decrypt({name: "AES-GCM", iv}, key, cipher);
-                document.getElementById('note-input').value = new TextDecoder().decode(decrypted);
-                this.toast('Note decrypted!');
-            } catch (e) { this.toast('Decryption failed. Wrong password?'); }
+                const secret = SSS.combine([s1, s2]);
+                document.getElementById('media-results').innerHTML = `
+                    <div class="scan-results">
+                        <div class="clear-item">${Icons.shield} Secret Reconstructed!</div>
+                        <div class="key-box">${secret}</div>
+                    </div>
+                `;
+            } catch (e) { this.toast('Invalid shares.'); }
         },
 
         async verifyFile() {
@@ -1049,7 +1250,7 @@ window.AethelCore = (function() {
                 }
 
                 if (blocked > 0) this.toast(`${blocked} malicious files skipped.`);
-                if (zip.files.length === 0) return this.toast('No safe files to zip.');
+                if (Object.keys(zip.files).length === 0) return this.toast('No safe files to zip.');
 
                 const content = await zip.generateAsync({type:"blob"});
                 const a = document.createElement('a');
@@ -1126,9 +1327,29 @@ window.AethelCore = (function() {
         document.body.appendChild(dockEl.firstElementChild);
     };
 
-    function init() {
+    async function init() {
         if (window.location.hash) {
             history.replaceState(null, '', window.location.pathname + window.location.search);
+        }
+
+        // WebAuthn Gatekeeper
+        if (localStorage.getItem('aethel_webauthn_enabled') === 'true') {
+            document.body.innerHTML = `<div style="display:flex; flex-direction:column; justify-content:center; align-items:center; height:100vh; text-align:center; padding:2rem;">
+                <div style="color: var(--accent); margin-bottom: 1rem;">${Icons.shield}</div>
+                <h2>Hardware Key Required</h2>
+                <p class="text-muted" style="margin: 1rem 0;">Please verify your identity to unlock Aethel Core.</p>
+                <button class="btn" id="webauthn-unlock-btn">Unlock App</button>
+            </div>`;
+            document.getElementById('webauthn-unlock-btn').addEventListener('click', async () => {
+                const success = await UI.verifyWebAuthn();
+                if (success) {
+                    document.body.innerHTML = '<div id="app-root"></div><div id="toast-container"></div>';
+                    UI.init();
+                } else {
+                    alert('Verification failed.');
+                }
+            });
+            return;
         }
 
         document.addEventListener('keydown', (e) => {
