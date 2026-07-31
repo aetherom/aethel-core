@@ -24,6 +24,17 @@ window.AethelCore = (function() {
         });
     }
 
+    async function ensureEthers() {
+        if (window.ethers) return;
+        await new Promise((resolve, reject) => {
+            const s = document.createElement('script');
+            s.src = 'https://cdnjs.cloudflare.com/ajax/libs/ethers/6.7.0/ethers.umd.min.js';
+            s.onload = resolve;
+            s.onerror = () => reject(new Error("Failed to load Ethers library."));
+            document.head.appendChild(s);
+        });
+    }
+
     // --- Utility Functions ---
     function base32ToUint8Array(base32) {
         const base32chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
@@ -140,7 +151,9 @@ window.AethelCore = (function() {
         batch: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>`,
         copy: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`,
         sss: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="12" r="3"></circle><path d="M9 12h6"></path></svg>`,
-        hardware: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>`
+        hardware: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>`,
+        breach: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>`,
+        crypto: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><path d="M9.5 8h4.5a2 2 0 0 1 0 4h-4.5a2 2 0 0 0 0 4h5"></path><line x1="12" y1="6" x2="12" y2="8"></line><line x1="12" y1="16" x2="12" y2="18"></line></svg>`
     };
 
     // --- Cryptographic Engines ---
@@ -168,8 +181,8 @@ window.AethelCore = (function() {
             const result = await argon2.hash({
                 pass: password,
                 salt: salt,
-                time: 3, // iterations
-                mem: 65536, // 64MB memory hard
+                time: 3,
+                mem: 65536,
                 hashLen: 32,
                 parallelism: 1,
                 type: argon2.ArgonType.Argon2id
@@ -222,6 +235,8 @@ window.AethelCore = (function() {
                 { id: 'vault', title: 'E2E Decrypter', desc: 'Decrypt .aethel encrypted files', icon: Icons.lock },
                 { id: 'notes', title: 'Deniable Notes', desc: 'Argon2id Vault with Decoy Password', icon: Icons.notes },
                 { id: 'sss', title: 'Key Splitter', desc: 'Shamir\'s Secret Sharing (2-of-3)', icon: Icons.sss },
+                { id: 'breach', title: 'Breach Checker', desc: 'Dark Web Password K-Anonymity Check', icon: Icons.breach },
+                { id: 'crypto', title: 'Crypto Wallet', desc: 'Generate Offline BIP39 Paper Wallet', icon: Icons.crypto },
                 { id: 'verify', title: 'Integrity Verifier', desc: 'Verify SHA-256 File Hashes', icon: Icons.verify },
                 { id: 'totp', title: 'TOTP Generator', desc: 'Client-side 2FA Codes', icon: Icons.totp },
                 { id: 'stego', title: 'Steganography', desc: 'Hide text inside images', icon: Icons.stego },
@@ -364,6 +379,41 @@ window.AethelCore = (function() {
                         <input type="text" id="sss-share-1" class="input" style="margin-bottom:0.5rem;" placeholder="Paste Share 1...">
                         <input type="text" id="sss-share-2" class="input" style="margin-bottom:0.5rem;" placeholder="Paste Share 2...">
                         <button class="btn btn-outline" data-action="sss-combine" style="width:100%;">${Icons.shield} Reconstruct Secret</button>
+                        <div id="media-results"></div>
+                    </div>
+                </div>
+            `;
+        },
+
+        breach() {
+            return `
+                <nav class="top-nav">
+                    <div class="nav-brand">${Icons.breach} BREACH CHECKER</div>
+                    <button class="btn btn-outline btn-sm" data-action="navigate" data-payload="dashboard">Back</button>
+                </nav>
+                <div class="container">
+                    <div class="card">
+                        <h3 style="margin-bottom: 1rem;">Dark Web Password Check</h3>
+                        <p class="text-muted" style="margin-bottom: 1rem;">Uses K-Anonymity (SHA-1). Your password is NEVER sent to any server. Only the first 5 characters of its hash are queried.</p>
+                        <input type="password" id="breach-input" class="input" style="margin-bottom:1rem;" placeholder="Enter password to check...">
+                        <button class="btn" data-action="check-breach" style="width:100%;">${Icons.scan} Check Against Breach Databases</button>
+                        <div id="media-results"></div>
+                    </div>
+                </div>
+            `;
+        },
+
+        crypto() {
+            return `
+                <nav class="top-nav">
+                    <div class="nav-brand">${Icons.crypto} CRYPTO WALLET</div>
+                    <button class="btn btn-outline btn-sm" data-action="navigate" data-payload="dashboard">Back</button>
+                </nav>
+                <div class="container">
+                    <div class="card">
+                        <h3 style="margin-bottom: 1rem;">BIP39 Paper Wallet Generator</h3>
+                        <p class="text-muted" style="margin-bottom: 1rem;">Generates a secure 12-word mnemonic phrase and Ethereum address entirely offline using native WebCrypto.</p>
+                        <button class="btn" data-action="generate-wallet" style="width:100%;">${Icons.lock} Generate Secure Wallet</button>
                         <div id="media-results"></div>
                     </div>
                 </div>
@@ -544,6 +594,8 @@ window.AethelCore = (function() {
             else if (action === 'load-note') { this.loadNote(); }
             else if (action === 'sss-split') { this.sssSplit(); }
             else if (action === 'sss-combine') { this.sssCombine(); }
+            else if (action === 'check-breach') { this.checkBreach(); }
+            else if (action === 'generate-wallet') { this.generateWallet(); }
             else if (action === 'verify-file') { this.verifyFile(); }
             else if (action === 'batch-process') { this.batchProcess(target.dataset.mode); }
             else if (action === 'stego-process') { this.stegoProcess(target.dataset.mode); }
@@ -1090,7 +1142,6 @@ window.AethelCore = (function() {
             if (!store.real && !store.decoy) return this.toast('No notes found.');
             this.toast('Attempting decryption (Argon2id)...');
             
-            // Try real vault first, then decoy. GCM auth tag verifies which password is correct.
             for (let type of ['real', 'decoy']) {
                 if (!store[type]) continue;
                 try {
@@ -1135,6 +1186,70 @@ window.AethelCore = (function() {
                     </div>
                 `;
             } catch (e) { this.toast('Invalid shares.'); }
+        },
+
+        async checkBreach() {
+            const pass = document.getElementById('breach-input').value;
+            if (!pass) return this.toast('Enter a password.');
+            this.toast('Hashing password (SHA-1)...');
+            try {
+                const encoder = new TextEncoder();
+                const data = encoder.encode(pass);
+                const hashBuffer = await crypto.subtle.digest('SHA-1', data);
+                const hashArray = Array.from(new Uint8Array(hashBuffer));
+                const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('').toUpperCase();
+                const prefix = hashHex.substring(0, 5);
+                const suffix = hashHex.substring(5);
+                
+                this.toast('Querying dark web database (K-Anonymity)...');
+                const res = await fetch(`https://api.pwnedpasswords.com/range/${prefix}`);
+                const text = await res.text();
+                const lines = text.split('\n');
+                let foundCount = 0;
+                for (let line of lines) {
+                    const [s, count] = line.split(':');
+                    if (s === suffix) {
+                        foundCount = parseInt(count.trim(), 10);
+                        break;
+                    }
+                }
+                
+                const resultsDiv = document.getElementById('media-results');
+                if (foundCount > 0) {
+                    resultsDiv.innerHTML = `
+                        <div class="threat-item" style="flex-direction:column; align-items:flex-start; text-align:left;">
+                            <div style="display:flex; align-items:center; gap:0.5rem;">${Icons.breach} BREACH DETECTED!</div>
+                            <p class="text-muted" style="margin-top:0.5rem;">This password has appeared in <strong style="color:var(--danger);">${foundCount.toLocaleString()}</strong> data breaches. Do NOT use it.</p>
+                        </div>
+                    `;
+                } else {
+                    resultsDiv.innerHTML = `
+                        <div class="clear-item">${Icons.shield} SAFE! This password was not found in any known data breaches.</div>
+                    `;
+                }
+            } catch (e) { this.toast('Error checking breach status.'); }
+        },
+
+        async generateWallet() {
+            this.toast('Generating secure entropy...');
+            try {
+                await ensureEthers();
+                const entropy = crypto.getRandomValues(new Uint8Array(16)); // 128 bits = 12 words
+                const mnemonic = ethers.Mnemonic.fromEntropy(entropy);
+                const wallet = ethers.HDNodeWallet.fromMnemonic(mnemonic);
+                
+                document.getElementById('media-results').innerHTML = `
+                    <div class="scan-results">
+                        <div class="clear-item">${Icons.crypto} Wallet generated successfully! (Ethers.js v6)</div>
+                        <p class="text-muted" style="margin: 1rem 0 0.5rem;">BIP39 Mnemonic Phrase (12 Words):</p>
+                        <div class="key-box">${mnemonic.phrase}</div>
+                        <p class="text-muted" style="margin: 1rem 0 0.5rem;">Ethereum Public Address:</p>
+                        <div class="mono" style="color: var(--accent); word-break: break-all; background: #000; padding: 0.5rem; border-radius: 6px;">${wallet.address}</div>
+                        <p class="text-muted" style="margin: 1rem 0 0.5rem;">Private Key (Keep Secret!):</p>
+                        <div class="key-box" style="border-color: var(--danger); color: var(--danger);">${wallet.privateKey}</div>
+                    </div>
+                `;
+            } catch (e) { this.toast('Wallet generation failed: ' + e.message); }
         },
 
         async verifyFile() {
