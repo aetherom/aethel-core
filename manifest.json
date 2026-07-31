@@ -19,5 +19,25 @@
       "purpose": "any maskable"
     }
   ],
+  "shortcuts": [
+    {
+      "name": "Link Tools",
+      "short_name": "Links",
+      "description": "Sanitize and analyze URLs",
+      "url": "./#/links"
+    },
+    {
+      "name": "E2E Decrypter",
+      "short_name": "Vault",
+      "description": "Decrypt encrypted files",
+      "url": "./#/vault"
+    },
+    {
+      "name": "Secure Notes",
+      "short_name": "Notes",
+      "description": "Open deniable notes vault",
+      "url": "./#/notes"
+    }
+  ],
   "prefer_related_applications": false
 }
