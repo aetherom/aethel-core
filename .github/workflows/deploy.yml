@@ -6,12 +6,25 @@ on:
       - main
 
 jobs:
-  deploy:
+  test-and-deploy:
     runs-on: ubuntu-latest
-    name: Deploy Aethel Core
+    name: Test and Deploy Aethel Core
     steps:
       - uses: actions/checkout@v3
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+          
+      - name: Install Dependencies
+        run: npm install
+        
+      - name: Run Unit Tests
+        run: npm test
+
       - name: Publish to Cloudflare Workers
+        if: success() # Only deploys if tests pass!
         uses: cloudflare/wrangler-action@v3.1.0
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
