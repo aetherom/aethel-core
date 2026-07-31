@@ -1325,7 +1325,7 @@ window.AethelCore = (function() {
                 const updateCode = async () => {
                     try {
                         const key = await crypto.subtle.importKey("raw", base32ToUint8Array(secret), {name: "HMAC", hash: "SHA-1"}, false, ["sign"]);
-                        const epoch = Math.floor(Date.now()1 / 1000);
+                        const epoch = Math.floor(Date.now() / 1000);
                         const counter = Math.floor(epoch / 30);
                         const buffer = new ArrayBuffer(8);
                         const view = new DataView(buffer);
@@ -1495,44 +1495,76 @@ window.AethelCore = (function() {
         document.body.appendChild(dockEl.firstElementChild);
     };
 
-    // --- Ad Gate Logic ---
+    // --- Modern Ad Wall ---
     function showAdGate(callback) {
         const gate = document.createElement('div');
-        gate.id = 'ad-gate';
-        gate.style.cssText = 'position:fixed;inset:0;background:#0B0F19;z-index:9999;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;padding:1rem;';
-        gate.innerHTML = `
-            <div style="max-width:450px;width:100%;">
-                <div style="color: var(--accent); margin-bottom: 1.5rem; display:flex; justify-content:center;">${Icons.shield}</div>
-                <h2 style="margin-bottom: 0.5rem;">Aethel Core</h2>
-                <p class="text-muted" style="margin-bottom: 2rem;">Sponsored message keeps this tool free.</p>
-                
-                <!-- AD PLACEMENT SLOT -->
-                <div style="background:var(--bg-card);border:1px dashed var(--border);padding:2rem;border-radius:12px;margin-bottom:2rem;">
-                    <p style="color:var(--text-muted);font-size:0.8rem;margin-bottom:0.5rem;">ADVERTISEMENT</p>
-                    <!-- Replace this with your actual Ad Code (e.g., Google AdSense) -->
-                    <div style="color:var(--accent);">Your Ad Here (300x250)</div>
+        gate.id = 'ad-gate-overlay';
+        gate.style.cssText = `
+            position: fixed; 
+            top: 0; left: 0; width: 100%; height: 100%; 
+            background: #0B0F19; 
+            z-index: 10000; 
+            display: flex; flex-direction: column; 
+            justify-content: center; align-items: center; 
+            text-align: center; padding: 1rem;
+            box-sizing: border-box;
+            font-family: 'Inter', sans-serif;
+        `;
+        
+        const content = document.createElement('div');
+        content.style.cssText = 'max-width: 450px; width: 100%;';
+        content.innerHTML = `
+            <div style="color: #00E5A0; margin-bottom: 1.5rem; display: flex; justify-content: center;">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+            </div>
+            <h2 style="margin-bottom: 0.5rem; color: #fff; font-weight: 700;">Aethel Core</h2>
+            <p style="color: #8B9BB4; margin-bottom: 2rem;">Sponsored message keeps this tool free for everyone.</p>
+            
+            <!-- GOOGLE ADSENSE SLOT -->
+            <div style="background: #151B2B; border: 1px solid rgba(255,255,255,0.08); padding: 2rem; border-radius: 16px; margin-bottom: 2rem; min-height: 250px; display: flex; align-items: center; justify-content: center;">
+                <div style="color: #8B9BB4; font-size: 0.9rem; text-align: center;">
+                    Advertisement Space<br>(300x250)
                 </div>
-
-                <button class="btn" id="skip-ad-btn" disabled style="width:100%;opacity:0.5;">Continue to App (5s)</button>
             </div>
         `;
+        gate.appendChild(content);
+
+        const skipBtn = document.createElement('button');
+        skipBtn.disabled = true;
+        skipBtn.style.cssText = `
+            width: 100%; padding: 1rem; border-radius: 10px; 
+            border: 1px solid rgba(255,255,255,0.08); 
+            background: #0F1420; color: #8B9BB4; 
+            cursor: not-allowed; font-weight: 700; 
+            font-family: 'Inter', sans-serif; font-size: 1rem;
+            transition: all 0.3s;
+        `;
+        skipBtn.innerText = 'Skip Ad in 15s';
+        content.appendChild(skipBtn);
+
         document.body.appendChild(gate);
         
-        let timeLeft = 5;
+        let timeLeft = 15;
         const timer = setInterval(() => {
             timeLeft--;
             if (timeLeft <= 0) {
                 clearInterval(timer);
-                const btn = document.getElementById('skip-ad-btn');
-                btn.disabled = false;
-                btn.style.opacity = '1';
-                btn.innerText = 'Continue to App';
-                btn.onclick = () => {
-                    gate.remove();
-                    callback();
+                skipBtn.disabled = false;
+                skipBtn.style.background = '#00E5A0';
+                skipBtn.style.color = '#000';
+                skipBtn.style.cursor = 'pointer';
+                skipBtn.style.border = 'none';
+                skipBtn.innerText = 'Continue to App';
+                skipBtn.onclick = () => {
+                    gate.style.opacity = '0';
+                    gate.style.transition = 'opacity 0.5s ease';
+                    setTimeout(() => {
+                        gate.remove();
+                        if (callback) callback();
+                    }, 500);
                 };
             } else {
-                document.getElementById('skip-ad-btn').innerText = `Continue to App (${timeLeft}s)`;
+                skipBtn.innerText = `Skip Ad in ${timeLeft}s`;
             }
         }, 1000);
     }
@@ -1540,37 +1572,45 @@ window.AethelCore = (function() {
     // --- Onboarding & Legal Trail ---
     function showOnboarding(callback) {
         if (localStorage.getItem('aethel_onboarded') === 'true') {
-            callback();
+            if (callback) callback();
             return;
         }
 
         const ob = document.createElement('div');
-        ob.id = 'onboarding';
-        ob.style.cssText = 'position:fixed;inset:0;background:#0B0F19;z-index:9998;display:flex;align-items:center;justify-content:center;padding:1rem;overflow-y:auto;';
+        ob.id = 'onboarding-overlay';
+        ob.style.cssText = `
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
+            background: #0B0F19; z-index: 9999; 
+            display: flex; align-items: center; justify-content: center; 
+            padding: 1rem; overflow-y: auto; box-sizing: border-box;
+            font-family: 'Inter', sans-serif;
+        `;
         ob.innerHTML = `
-            <div class="card" style="max-width:600px;margin:2rem 0;">
-                <div style="text-align:center; margin-bottom:1rem; color:var(--accent);">${Icons.shield}</div>
-                <h2 style="text-align:center; margin-bottom:0.5rem;">Why Aethel Core?</h2>
-                <p class="text-muted" style="text-align:center; margin-bottom:2rem;">Your data is yours. We exist to keep it that way.</p>
+            <div style="max-width: 600px; width: 100%; background: #151B2B; border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 2rem; margin: 2rem 0;">
+                <div style="text-align: center; margin-bottom: 1rem; color: #00E5A0;">
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+                </div>
+                <h2 style="text-align: center; margin-bottom: 0.5rem; color: #fff;">Why Aethel Core?</h2>
+                <p style="text-align: center; margin-bottom: 2rem; color: #8B9BB4;">Your data is yours. We exist to keep it that way.</p>
                 
-                <div style="margin-bottom:1.5rem;">
-                    <h4 style="color:var(--accent); margin-bottom:0.5rem;">1. Zero-Knowledge Architecture</h4>
-                    <p class="text-muted" style="font-size:0.9rem;">Unlike cloud tools, every function (encryption, conversion, scanning) executes directly in your browser thread. Your files never touch a server.</p>
+                <div style="margin-bottom: 1.5rem;">
+                    <h4 style="color: #00E5A0; margin-bottom: 0.5rem;">1. Zero-Knowledge Architecture</h4>
+                    <p style="color: #8B9BB4; font-size: 0.9rem;">Unlike cloud tools, every function (encryption, conversion, scanning) executes directly in your browser thread. Your files never touch a server.</p>
                 </div>
 
-                <div style="margin-bottom:1.5rem;">
-                    <h4 style="color:var(--accent); margin-bottom:0.5rem;">2. Military-Grade Cryptography</h4>
-                    <p class="text-muted" style="font-size:0.9rem;">We use native WebCrypto (AES-GCM 256-bit), Argon2id memory-hard key derivation, and Shamir's Secret Sharing to ensure mathematically provable security.</p>
+                <div style="margin-bottom: 1.5rem;">
+                    <h4 style="color: #00E5A0; margin-bottom: 0.5rem;">2. Military-Grade Cryptography</h4>
+                    <p style="color: #8B9BB4; font-size: 0.9rem;">We use native WebCrypto (AES-GCM 256-bit), Argon2id memory-hard key derivation, and Shamir's Secret Sharing to ensure mathematically provable security.</p>
                 </div>
 
-                <div style="margin-bottom:2rem;">
-                    <h4 style="color:var(--accent); margin-bottom:0.5rem;">3. Protection from Surveillance</h4>
-                    <p class="text-muted" style="font-size:0.9rem;">Strip GPS metadata from photos, sanitize tracking links, and hide data inside images using steganography to evade corporate and state surveillance.</p>
+                <div style="margin-bottom: 2rem;">
+                    <h4 style="color: #00E5A0; margin-bottom: 0.5rem;">3. Protection from Surveillance</h4>
+                    <p style="color: #8B9BB4; font-size: 0.9rem;">Strip GPS metadata from photos, sanitize tracking links, and hide data inside images using steganography to evade corporate and state surveillance.</p>
                 </div>
 
-                <div style="border:1px solid var(--danger); background:rgba(255,77,77,0.05); padding:1rem; border-radius:8px; margin-bottom:2rem;">
-                    <h4 style="color:var(--danger); margin-bottom:0.5rem;">Legal Disclaimer & Liability Waiver</h4>
-                    <p style="font-size:0.8rem; color:var(--text-muted); line-height:1.5;">
+                <div style="border: 1px solid #FF4D4D; background: rgba(255,77,77,0.05); padding: 1rem; border-radius: 8px; margin-bottom: 2rem;">
+                    <h4 style="color: #FF4D4D; margin-bottom: 0.5rem;">Legal Disclaimer & Liability Waiver</h4>
+                    <p style="font-size: 0.8rem; color: #8B9BB4; line-height: 1.5;">
                         <strong>UK & GLOBAL COMPLIANCE:</strong> This software is provided "as is", without warranty of any kind, express or implied. The authors and copyright holders are <strong>not liable for any claim, damages, or other liability</strong>, whether in an action of contract, tort or otherwise, arising from, out of, or in connection with the software or the use or other dealings in the software.
                         <br><br>
                         <strong>NO FINANCIAL ADVICE:</strong> The Crypto Wallet generator is for educational purposes only. Do not use generated wallets for large funds.
@@ -1579,19 +1619,59 @@ window.AethelCore = (function() {
                     </p>
                 </div>
 
-                <button class="btn" id="agree-btn" style="width:100%;">I Agree & Enter Workspace</button>
+                <button id="agree-btn" style="width: 100%; padding: 1rem; border-radius: 10px; border: none; background: #00E5A0; color: #000; font-weight: 700; cursor: pointer; font-size: 1rem; font-family: 'Inter', sans-serif;">I Agree & Enter Workspace</button>
             </div>
         `;
         document.body.appendChild(ob);
 
         document.getElementById('agree-btn').onclick = () => {
             localStorage.setItem('aethel_onboarded', 'true');
-            ob.remove();
-            callback();
+            ob.style.opacity = '0';
+            ob.style.transition = 'opacity 0.5s ease';
+            setTimeout(() => {
+                ob.remove();
+                if (callback) callback();
+            }, 500);
         };
     }
 
-    async function init() {
+    // --- WebAuthn Gate ---
+    function showWebAuthnGate(callback) {
+        const gate = document.createElement('div');
+        gate.id = 'webauthn-gate';
+        gate.style.cssText = `
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
+            background: #0B0F19; z-index: 9998; 
+            display: flex; flex-direction: column; justify-content: center; align-items: center; 
+            text-align: center; padding: 2rem; box-sizing: border-box;
+            font-family: 'Inter', sans-serif;
+        `;
+        gate.innerHTML = `
+            <div style="color: #00E5A0; margin-bottom: 1rem;">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+            </div>
+            <h2 style="color: #fff; margin-bottom: 0.5rem;">Hardware Key Required</h2>
+            <p style="color: #8B9BB4; margin: 1rem 0;">Please verify your identity to unlock Aethel Core.</p>
+            <button id="webauthn-unlock-btn" style="padding: 1rem 1.5rem; border-radius: 10px; border: none; background: #00E5A0; color: #000; font-weight: 700; cursor: pointer; font-size: 1rem; font-family: 'Inter', sans-serif;">Unlock App</button>
+        `;
+        document.body.appendChild(gate);
+
+        document.getElementById('webauthn-unlock-btn').addEventListener('click', async () => {
+            const success = await UI.verifyWebAuthn();
+            if (success) {
+                gate.style.opacity = '0';
+                gate.style.transition = 'opacity 0.5s ease';
+                setTimeout(() => {
+                    gate.remove();
+                    if (callback) callback();
+                }, 500);
+            } else {
+                alert('Verification failed.');
+            }
+        });
+    }
+
+    function init() {
         if (window.location.hash) {
             history.replaceState(null, '', window.location.pathname + window.location.search);
         }
@@ -1600,21 +1680,7 @@ window.AethelCore = (function() {
         showAdGate(() => {
             showOnboarding(() => {
                 if (localStorage.getItem('aethel_webauthn_enabled') === 'true') {
-                    document.body.innerHTML = `<div style="display:flex; flex-direction:column; justify-content:center; align-items:center; height:100vh; text-align:center; padding:2rem;">
-                        <div style="color: var(--accent); margin-bottom: 1rem;">${Icons.shield}</div>
-                        <h2>Hardware Key Required</h2>
-                        <p class="text-muted" style="margin: 1rem 0;">Please verify your identity to unlock Aethel Core.</p>
-                        <button class="btn" id="webauthn-unlock-btn">Unlock App</button>
-                    </div>`;
-                    document.getElementById('webauthn-unlock-btn').addEventListener('click', async () => {
-                        const success = await UI.verifyWebAuthn();
-                        if (success) {
-                            document.body.innerHTML = '<div id="app-root"></div><div id="toast-container"></div>';
-                            UI.init();
-                        } else {
-                            alert('Verification failed.');
-                        }
-                    });
+                    showWebAuthnGate(() => UI.init());
                 } else {
                     UI.init();
                 }
