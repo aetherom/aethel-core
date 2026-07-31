@@ -1,0 +1,7 @@
+node_modules
+tests
+.github
+.gitignore
+package.json
+package-lock.json
+wrangler.toml
