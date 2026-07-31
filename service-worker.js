@@ -1,11 +1,12 @@
-const CACHE_NAME = 'aethel-core-network-first-v1';
+const CACHE_NAME = 'aethel-core-network-first-v2';
 const CORE_ASSETS = [
     './',
     './index.html',
     './app.js',
     './legal-text.js',
     './manifest.json',
-    './icon.svg'
+    './icon.svg',
+    './robots.txt'
 ];
 
 self.addEventListener('install', (event) => {
@@ -24,8 +25,7 @@ self.addEventListener('activate', (event) => {
     );
 });
 
-// Network-First Strategy: Always fetches new code if online.
-// Only uses cache if offline.
+// Network-First Strategy for robust PWA behavior
 self.addEventListener('fetch', (event) => {
     if (event.request.method !== 'GET') return;
     
@@ -38,7 +38,11 @@ self.addEventListener('fetch', (event) => {
             return networkResponse;
         }).catch(() => {
             return caches.match(event.request).then(cachedResponse => {
-                return cachedResponse || caches.match('./index.html');
+                // Fallback to index.html for navigation requests if offline
+                if (event.request.mode === 'navigate') {
+                    return cachedResponse || caches.match('./index.html');
+                }
+                return cachedResponse;
             });
         })
     );
